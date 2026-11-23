@@ -2,7 +2,6 @@ package dev.lolokeksu.scrimroom
 
 import android.graphics.Bitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
-import androidx.compose.ui.test.assertExists
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -47,7 +46,7 @@ class ScrimRoomUiTest {
         compose.onNodeWithText("Профиль игрока").assertIsDisplayed()
         shot("03-profile")
         compose.onNodeWithText("Матчи").performClick()
-        compose.onNodeWithText("История пуста").assertExists()
+        compose.onNodeWithText("История / только демо").assertExists()
         shot("04-empty-history")
     }
 

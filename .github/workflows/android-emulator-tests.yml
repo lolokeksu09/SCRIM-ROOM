@@ -36,17 +36,7 @@ jobs:
           profile: pixel_6
           emulator-options: -no-window -no-audio -no-boot-anim -gpu swiftshader_indirect -no-snapshot
           disable-animations: true
-          script: |
-            mkdir -p ui-evidence
-            adb shell wm size
-            adb shell wm density
-            set +e
-            gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace
-            status=$?
-            adb pull /sdcard/Android/data/dev.lolokeksu.scrimroom/files/ui-captures/ ui-evidence/ || true
-            adb exec-out screencap -p > ui-evidence/final-screen.png || true
-            adb logcat -d -s AndroidRuntime:E > ui-evidence/crashes.log || true
-            exit "$status"
+          script: bash .github/scripts/run-emulator-ui-tests.sh
       - name: Upload emulator evidence and instrumentation report
         if: always()
         uses: actions/upload-artifact@v4
