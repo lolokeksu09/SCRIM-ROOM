@@ -3,6 +3,7 @@ on:
   push:
     paths:
       - source-bundle.tar.xz
+      - build-trigger.txt
   workflow_dispatch:
 
 permissions:
@@ -32,7 +33,7 @@ jobs:
       - name: Publish expanded readable source files
         run: |
           set -euo pipefail
-          rm -f source-bundle.tar.xz .github/workflows/bootstrap.yml
+          rm -f source-bundle.tar.xz .github/workflows/android-debug.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
