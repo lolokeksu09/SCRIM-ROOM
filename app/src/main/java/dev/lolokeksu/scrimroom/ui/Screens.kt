@@ -100,7 +100,7 @@ private fun PanelCard(content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun PrimaryAction(text: String, onClick: () -> Unit, enabled: Boolean = true) {
+private fun PrimaryAction(text: String, enabled: Boolean = true, onClick: () -> Unit) {
     Button(
         onClick = onClick,
         enabled = enabled,
@@ -111,7 +111,7 @@ private fun PrimaryAction(text: String, onClick: () -> Unit, enabled: Boolean = 
 }
 
 @Composable
-private fun SecondaryAction(text: String, onClick: () -> Unit, enabled: Boolean = true) {
+private fun SecondaryAction(text: String, enabled: Boolean = true, onClick: () -> Unit) {
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
@@ -232,7 +232,7 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
                 modifier = Modifier.fillMaxWidth()
             )
             Text("Используй только адрес сервера проекта. При его смене старая привязка аккаунта сбрасывается.", color = Muted, fontSize = 12.sp)
-            SecondaryAction("Сохранить адрес", { vm.saveServerUrl(serverAddress) }, enabled = !state.onlineBusy)
+            SecondaryAction("Сохранить адрес", enabled = !state.onlineBusy) { vm.saveServerUrl(serverAddress) }
             StatusPill(when(state.onlineStatus) {
                 "APPROVED" -> "Онлайн: допущен"
                 "PENDING_REVIEW" -> "Онлайн: ожидает модерации"
@@ -241,7 +241,7 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
             }, active = state.onlineStatus == "APPROVED")
             if (state.hasOnlineAccount) {
                 Text("Скриншотов на сервере: ${state.onlineEvidenceCount}", color = Muted, fontSize = 12.sp)
-                SecondaryAction("Проверить статус", { vm.syncOnline() }, enabled = !state.onlineBusy)
+                SecondaryAction("Проверить статус", enabled = !state.onlineBusy) { vm.syncOnline() }
             }
         }
         if (profile.verification == Verification.PENDING_REVIEW) {
@@ -349,7 +349,7 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                         else -> "Проверка статуса"
                     })
                     Text("До одобрения модератором вступить в очередь нельзя.", color = Muted, fontSize = 13.sp)
-                    SecondaryAction("Обновить статус", { vm.syncOnline() }, enabled = !state.onlineBusy)
+                    SecondaryAction("Обновить статус", enabled = !state.onlineBusy) { vm.syncOnline() }
                 }
                 else -> {
                     StatusPill("Допуск подтверждён", active = true)
@@ -360,7 +360,7 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                         info?.queued == true -> {
                             Text("Поиск запущен", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                             Text("Игроков в ожидании в этом регионе: ${info.waiting}", color = Muted, fontSize = 13.sp)
-                            SecondaryAction("Покинуть очередь", { vm.leaveOnlineQueue() }, enabled = !state.onlineBusy)
+                            SecondaryAction("Покинуть очередь", enabled = !state.onlineBusy) { vm.leaveOnlineQueue() }
                         }
                         else -> {
                             Text("Ожидаем 10 подтверждённых участников одного региона. Подбор учитывает две предпочитаемые роли и предварительную оценку силы.",
@@ -368,7 +368,7 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                             PrimaryAction("Найти пользовательский матч", enabled = !state.onlineBusy) { vm.joinOnlineQueue() }
                         }
                     }
-                    SecondaryAction("Обновить", { vm.refreshQueue() }, enabled = !state.onlineBusy)
+                    SecondaryAction("Обновить", enabled = !state.onlineBusy) { vm.refreshQueue() }
                 }
             }
         }
@@ -407,7 +407,7 @@ private fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boolea
         if (match.status == "READY_CHECK") {
             Text("Подтверди готовность в течение трёх минут после создания матча. Если не все ответят, матч отменится.", color = Muted, fontSize = 12.sp)
             PrimaryAction("Я готов", enabled = !busy) { vm.readyOnlineMatch(match.id) }
-            SecondaryAction("Отказаться", { vm.declineOnlineMatch(match.id) }, enabled = !busy)
+            SecondaryAction("Отказаться", enabled = !busy) { vm.declineOnlineMatch(match.id) }
         }
         OnlineTeamPanel("Синяя команда", match.blue, Blue)
         OnlineTeamPanel("Красная команда", match.red, Red)
