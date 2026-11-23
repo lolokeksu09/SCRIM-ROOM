@@ -1,0 +1,65 @@
+name: Bootstrap public source and build Android
+on:
+  push:
+    paths:
+      - source-bundle.tar.xz
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Expand reviewed project source
+        run: |
+          set -euo pipefail
+          test -f source-bundle.tar.xz
+          tar -tJf source-bundle.tar.xz | while read -r p; do
+            case "$p" in
+              scrim-room-android/*) ;;
+              *) echo "Unsafe archive path: $p" >&2; exit 1 ;;
+            esac
+          done
+          tar -xJf source-bundle.tar.xz --strip-components=1
+          test -f app/build.gradle.kts
+          test -f server/app.py
+          test -f .github/workflows/android-debug.yml
+      - name: Publish expanded readable source files
+        run: |
+          set -euo pipefail
+          rm -f source-bundle.tar.xz .github/workflows/bootstrap.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: publish SCRIM ROOM Android client and private custom-match API"
+          git push origin HEAD:main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: API integration tests
+        run: |
+          python -m pip install -r server/requirements-test.txt
+          python -m pytest -q server/tests
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK Platform 35
+        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - name: Assemble debug APK
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SCRIM-ROOM-Android-0.2.1-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
