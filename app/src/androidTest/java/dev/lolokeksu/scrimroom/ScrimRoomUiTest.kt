@@ -1,6 +1,8 @@
 package dev.lolokeksu.scrimroom
 
 import android.graphics.Bitmap
+import android.content.ContentValues
+import android.provider.MediaStore
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -12,8 +14,6 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.captureToImage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import java.io.File
-import java.io.FileOutputStream
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,10 +28,16 @@ class ScrimRoomUiTest {
 
     private fun shot(name: String) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
-        val folder = File(context.getExternalFilesDir(null), "ui-captures")
-        check(folder.exists() || folder.mkdirs())
         val bitmap = compose.onRoot().captureToImage().asAndroidBitmap()
-        FileOutputStream(File(folder, "$name.png")).use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, "$name.png")
+            put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ScrimRoomTests")
+        }
+        val uri = checkNotNull(context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values))
+        context.contentResolver.openOutputStream(uri)?.use {
+            check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it))
+        } ?: error("Failed to write test screenshot")
     }
 
     @Test fun navigationAndOfflineQueue() {
@@ -46,7 +52,7 @@ class ScrimRoomUiTest {
         compose.onNodeWithText("Профиль игрока").assertIsDisplayed()
         shot("03-profile")
         compose.onNodeWithText("Матчи").performClick()
-        compose.onNodeWithText("История / только демо").assertExists()
+        compose.onNodeWithText("ИСТОРИЯ / ТОЛЬКО ДЕМО").assertExists()
         shot("04-empty-history")
     }
 

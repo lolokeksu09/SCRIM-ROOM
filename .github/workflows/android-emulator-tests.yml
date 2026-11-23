@@ -15,6 +15,10 @@ jobs:
   emulator-ui:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        api-level: [33, 35]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -30,7 +34,7 @@ jobs:
       - name: Run actual Android UI tests on API 35
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 35
+          api-level: ${{ matrix.api-level }}
           arch: x86_64
           target: google_apis
           profile: pixel_6
@@ -41,7 +45,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: SCRIM-ROOM-emulator-API35-evidence
+          name: SCRIM-ROOM-emulator-API${{ matrix.api-level }}-evidence
           path: |
             ui-evidence/**
             app/build/outputs/androidTest-results/connected/**
