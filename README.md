@@ -1,8 +1,8 @@
-# SCRIM ROOM — Android + pilot server 0.2
+# SCRIM ROOM — Android + pilot server 0.2.1
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
-## Delivered in 0.2
+## Delivered in 0.2.1
 
 ### Native Android client
 - Kotlin / Jetpack Compose, AMOLED UI, minSdk 26, targetSdk 35.
@@ -39,7 +39,7 @@ gradle :app:assembleDebug --no-daemon
 
 Expected output: `app/build/outputs/apk/debug/app-debug.apk`. A debug APK is automatically signed with Android's *debug certificate*, **not** a user-owned release signing key. No signed release is included.
 
-The present execution environment lacks both Gradle and Android SDK and has no direct access to Maven/Google distribution hosts, therefore **APK compilation and Android runtime verification have NOT been performed**. CI workflow is prepared but has NOT been run on GitHub.
+GitHub Actions has successfully compiled and uploaded a **debug** APK. Real-device installation and interactive testing have NOT yet been performed. The online server is not deployed.
 
 ## Run the server locally
 
