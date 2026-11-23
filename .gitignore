@@ -1,0 +1,15 @@
+.gradle/
+.idea/
+**/build/
+local.properties
+*.apk
+*.aab
+.DS_Store
+__pycache__/
+.pytest_cache/
+*.pyc
+.env
+*.sqlite3
+*.db
+.venv/
+*.jar

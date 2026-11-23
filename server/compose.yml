@@ -1,0 +1,21 @@
+services:
+  scrim-api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      SCRIM_DB_PATH: /data/scrim.sqlite3
+      SCRIM_ADMIN_KEY: ${SCRIM_ADMIN_KEY:?Define a secret admin key with 32+ characters}
+    ports:
+      - '127.0.0.1:8765:8080'
+    volumes:
+      - scrim-data:/data
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+
+volumes:
+  scrim-data:

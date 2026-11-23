@@ -1,0 +1,6 @@
+# Example only; configure a dedicated hostname and DNS BEFORE deploying.
+# Do not overwrite the existing Ventry Caddy configuration.
+# YOUR_SCRIM_SUBDOMAIN.example.com {
+#     encode zstd gzip
+#     reverse_proxy 127.0.0.1:8765
+# }
