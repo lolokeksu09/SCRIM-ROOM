@@ -418,7 +418,7 @@ def create_app(db_path: str, admin_key: str | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.8.0', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.9.0', docs_url=None, redoc_url=None)
 
     def limit(scope, identity, maximum, period):
         stamp=now_ts()
@@ -496,6 +496,8 @@ def create_app(db_path: str, admin_key: str | None = None):
     def update_me(payload: ProfileIn,token=Depends(token_header)):
         with store.transaction(write=True) as db:
             user=get_user(db,token)
+            if db.execute('SELECT 1 FROM club_members WHERE account_id=?',(user['id'],)).fetchone():
+                raise HTTPException(409,'Перед изменением анкеты выйди из команды')
             if _active_match_id(db,user['id']):
                 raise HTTPException(409, 'Заверши текущий матч перед изменением анкеты')
             high_rank=max((payload.current_rank,payload.previous_rank), key=lambda v:RANK_VALUES[v])
@@ -842,6 +844,8 @@ def create_app(db_path: str, admin_key: str | None = None):
     install_community(app, store, token_header, admin_auth, limit, get_user, now_ts, session_status)
     from server.match_experience import install_match_experience
     install_match_experience(app,store,token_header,admin_auth,limit,match_member,get_user,now_ts,_read_safe_image,MAX_IMAGE_BYTES)
+    from server.competitive import install_competitive
+    install_competitive(app,store,token_header,admin_auth,limit,get_user,now_ts)
     return app
 
 
