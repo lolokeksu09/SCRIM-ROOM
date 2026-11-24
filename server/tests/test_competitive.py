@@ -31,6 +31,7 @@ def test_team_challenge_and_cup(tmp_path,monkeypatch):
         assert r.status_code==201,r.text
         fid=r.json()['id']
         assert c.post('/v1/competitive/team/leave',headers=auth(users[1])).status_code==409
+        assert c.get('/v1/competitive',headers=h2).json()['my_team']['locked'] is False
         assert c.post(f'/v1/competitive/challenges/{fid}/accept',headers=h).status_code==403
         assert c.post(f'/v1/competitive/challenges/{fid}/accept',headers=h2).status_code==200
         route=f'/v1/admin/competitive/fixtures/{fid}/resolve'

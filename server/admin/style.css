@@ -6,3 +6,5 @@
 #sessionList{margin-top:16px}#sessionForm input,#sessionForm select{min-width:0;width:100%}nav{flex-wrap:wrap}
 
 #complaintList textarea{font:inherit;background:#1b2023;color:var(--text);border:1px solid var(--line);border-radius:8px;width:100%;padding:10px;min-height:80px;resize:vertical}
+
+#seasonForm input,#seasonForm select,#cupForm input,#cupForm select,#fixtureList textarea{width:100%;min-width:0}#cupTeams{display:grid;gap:10px}#fixtureList textarea{background:#1b2023;color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;min-height:70px}#competitive article{margin-bottom:12px}#fixtureList button{margin:4px;max-width:100%;overflow-wrap:anywhere}

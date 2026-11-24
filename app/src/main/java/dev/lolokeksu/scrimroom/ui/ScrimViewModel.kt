@@ -11,6 +11,7 @@ import dev.lolokeksu.scrimroom.data.OnlineResult
 import dev.lolokeksu.scrimroom.data.PersonalStats
 import dev.lolokeksu.scrimroom.data.PlaySession
 import dev.lolokeksu.scrimroom.data.CommunityData
+import dev.lolokeksu.scrimroom.data.ClubData
 import dev.lolokeksu.scrimroom.data.SocialPlayer
 import dev.lolokeksu.scrimroom.data.OcrSuggestions
 import dev.lolokeksu.scrimroom.data.RemoteClient
@@ -47,6 +48,7 @@ data class ScrimUiState(
     val personalStats: PersonalStats? = null,
     val sessions: List<PlaySession>? = null,
     val community: CommunityData? = null,
+    val club: ClubData? = null,
     val foundPlayer: SocialPlayer? = null,
     val ocrSuggestions: OcrSuggestions? = null,
     val onlineBusy: Boolean = false,
@@ -91,6 +93,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             personalStats = if (changed) null else it.personalStats,
             sessions = if (changed) null else it.sessions,
             community = if (changed) null else it.community,
+            club = if (changed) null else it.club,
             foundPlayer = if (changed) null else it.foundPlayer,
             ocrSuggestions = if (changed) null else it.ocrSuggestions,
             onlineEvidenceCount = if (changed) 0 else it.onlineEvidenceCount,
@@ -324,6 +327,23 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         api.complain(token,match,id,category,note)
         _state.update { it.copy(message = "Жалоба отправлена модератору") }
     }
+
+    private fun clubAction(action:(RemoteClient,String)->Unit={_,_->}) = onlineAction {
+        val token=store.readServerToken()
+        if(token.isBlank()) return@onlineAction
+        val api=RemoteClient(store.readServerUrl())
+        action(api,token)
+        val club=api.competitive(token)
+        _state.update { it.copy(club=club) }
+    }
+    fun loadClub()=clubAction()
+    fun createClubTeam(name:String)=clubAction { api,t -> api.createClubTeam(t,name) }
+    fun inviteClubMember(riotId:String)=clubAction { api,t -> api.inviteClubMember(t,riotId); _state.update { it.copy(message="Приглашение отправлено") } }
+    fun clubInviteAction(id:String,accept:Boolean)=clubAction { api,t -> api.clubInviteAction(t,id,accept) }
+    fun leaveClubTeam()=clubAction { api,t -> api.leaveClubTeam(t) }
+    fun clubMemberAction(id:String,transfer:Boolean)=clubAction { api,t -> api.clubMemberAction(t,id,transfer) }
+    fun createClubChallenge(opponent:String,season:String,starts:Long)=clubAction { api,t -> api.createClubChallenge(t,opponent,season,starts) }
+    fun clubChallengeAction(id:String,accept:Boolean)=clubAction { api,t -> api.clubChallengeAction(t,id,accept) }
 
     fun persistDocumentUris(uris: List<Uri>): List<String> {
         val resolver = getApplication<Application>().contentResolver

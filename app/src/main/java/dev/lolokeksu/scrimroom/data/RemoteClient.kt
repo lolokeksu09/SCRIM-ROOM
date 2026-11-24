@@ -148,6 +148,25 @@ class RemoteClient(baseInput: String) {
     fun complain(token: String, matchId: String, id: String, category: String, note: String) = jsonRequest("POST", "/v1/community/reports", token,
         JSONObject().put("match_id", matchId).put("account_id", id).put("category", category).put("note", note))
 
+    fun competitive(token: String): ClubData {
+        val obj=jsonRequest("GET","/v1/competitive",token)
+        fun rows(name:String)=obj.getJSONArray(name).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+        fun team(t:JSONObject)=ClubTeam(t.getString("id"),t.getString("name"),t.getBoolean("eligible"),t.getBoolean("locked"),t.getInt("played"),t.getInt("wins"),t.optString("captain"),
+            t.optJSONArray("members")?.let { a -> (0 until a.length()).map { i -> a.getJSONObject(i).let { ClubMember(it.getString("id"),it.getString("riot_id"),it.getString("role")) } } }.orEmpty())
+        return ClubData(obj.optJSONObject("my_team")?.let { team(it) },obj.getBoolean("is_captain"),rows("teams").map { team(it) },
+            rows("invites").map { ClubInvite(it.getString("id"),it.getString("name")) },
+            rows("seasons").map { ClubSeason(it.getString("id"),it.getString("name"),it.getLong("starts_at"),it.getLong("ends_at")) },
+            rows("fixtures").map { ClubFixture(it.getString("id"),it.getString("team_a"),it.getString("team_b"),it.getString("team_a_name"),it.getString("team_b_name"),it.getString("stage"),it.getString("status"),it.getLong("starts_at"),it.optString("winner_id").takeUnless { s -> s=="null" || s.isBlank() },it.optString("cup_id").takeUnless { s -> s=="null" || s.isBlank() }) },
+            rows("cups").map { ClubCup(it.getString("id"),it.getString("name"),it.getString("status"),it.optString("winner_id").takeUnless { s -> s=="null" || s.isBlank() }) })
+    }
+    fun createClubTeam(token:String,name:String)=jsonRequest("POST","/v1/competitive/teams",token,JSONObject().put("name",name))
+    fun inviteClubMember(token:String,riotId:String)=jsonRequest("POST","/v1/competitive/team/invite",token,JSONObject().put("riot_id",riotId))
+    fun clubInviteAction(token:String,id:String,accept:Boolean)=jsonRequest("POST","/v1/competitive/invites/${Uri.encode(id)}/${if(accept) "accept" else "dismiss"}",token)
+    fun leaveClubTeam(token:String)=jsonRequest("POST","/v1/competitive/team/leave",token)
+    fun clubMemberAction(token:String,id:String,transfer:Boolean)=jsonRequest("POST","/v1/competitive/team/members/${Uri.encode(id)}/${if(transfer) "captain" else "remove"}",token)
+    fun createClubChallenge(token:String,opponent:String,season:String,starts:Long)=jsonRequest("POST","/v1/competitive/challenges",token,JSONObject().put("opponent_id",opponent).put("season_id",season).put("starts_at",starts))
+    fun clubChallengeAction(token:String,id:String,accept:Boolean)=jsonRequest("POST","/v1/competitive/challenges/${Uri.encode(id)}/${if(accept) "accept" else "decline"}",token)
+
     fun uploadEvidence(token: String, resolver: ContentResolver, uri: Uri): JSONObject = uploadImage(token,resolver,uri,"/v1/me/evidence")
 
     private fun uploadImage(token: String, resolver: ContentResolver, uri: Uri, path: String): JSONObject {
@@ -269,3 +288,11 @@ data class SessionInvitation(val id: String, val title: String, val sender: Stri
 data class ComplaintStatus(val category: String, val status: String)
 data class RecentPlayer(val matchId: String, val accountId: String, val riotId: String, val createdAt: Long)
 data class CommunityData(val friends: List<SocialPlayer>, val invites: List<SessionInvitation>, val reports: List<ComplaintStatus>, val recent: List<RecentPlayer>, val confirmedComplaints: Int)
+
+data class ClubMember(val id:String,val riotId:String,val role:String)
+data class ClubTeam(val id:String,val name:String,val eligible:Boolean,val locked:Boolean,val played:Int,val wins:Int,val captain:String,val members:List<ClubMember>)
+data class ClubInvite(val id:String,val name:String)
+data class ClubSeason(val id:String,val name:String,val starts:Long,val ends:Long)
+data class ClubFixture(val id:String,val a:String,val b:String,val aName:String,val bName:String,val stage:String,val status:String,val starts:Long,val winner:String?,val cupId:String?)
+data class ClubCup(val id:String,val name:String,val status:String,val winner:String?)
+data class ClubData(val mine:ClubTeam?,val captain:Boolean,val teams:List<ClubTeam>,val invites:List<ClubInvite>,val seasons:List<ClubSeason>,val fixtures:List<ClubFixture>,val cups:List<ClubCup>)

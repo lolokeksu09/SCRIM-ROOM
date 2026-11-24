@@ -91,8 +91,8 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
             fail(409,'Нужны пять допущенных участников одного региона')
         return [{'id':r['id'],'riot_id':r['riot_id'],'role':r['role']} for r in rows]
     def locked(db,tid):
-        return bool(db.execute("""SELECT 1 FROM club_fixtures WHERE (team_a=? OR team_b=?) AND status IN ('PENDING','SCHEDULED')
-          UNION ALL SELECT 1 FROM club_cup_entries e JOIN club_cups c ON c.id=e.cup_id WHERE e.team_id=? AND c.status='RUNNING' LIMIT 1""",(tid,tid,tid)).fetchone())
+        return bool(db.execute("""SELECT 1 FROM club_fixtures WHERE ((team_a=? AND status='PENDING') OR ((team_a=? OR team_b=?) AND status='SCHEDULED'))
+          UNION ALL SELECT 1 FROM club_cup_entries e JOIN club_cups c ON c.id=e.cup_id WHERE e.team_id=? AND c.status='RUNNING' LIMIT 1""",(tid,tid,tid,tid)).fetchone())
     def unlocked(db,tid):
         if locked(db,tid): fail(409,'Состав зафиксирован до завершения встречи или турнира')
     def card(db,t):
@@ -192,7 +192,7 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
     @app.post('/v1/competitive/team/leave')
     def leave(token=Depends(token_header)):
         with store.transaction(write=True) as db:
-            u=actor(db,token); expire(db); t=own(db,u)
+            u=get_user(db,token); expire(db); t=own(db,u)
             if not t: fail(404,'Ты не в команде')
             unlocked(db,t['id'])
             if t['captain']==u['id']:
@@ -205,7 +205,7 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
     @app.post('/v1/competitive/team/members/{ident}/{action}')
     def member_action(ident:str,action:Literal['remove','captain'],token=Depends(token_header)):
         with store.transaction(write=True) as db:
-            u=actor(db,token); expire(db); t=captain(db,u); unlocked(db,t['id'])
+            u=get_user(db,token); expire(db); t=captain(db,u); unlocked(db,t['id'])
             if ident==u['id'] or not db.execute('SELECT 1 FROM club_members WHERE account_id=? AND team_id=?',(ident,t['id'])).fetchone(): fail(404,'Участник не найден')
             if action=='captain':
                 if not db.execute("SELECT 1 FROM accounts WHERE id=? AND status='APPROVED'",(ident,)).fetchone(): fail(409,'Игрок не допущен')
@@ -230,7 +230,9 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
             if f['stage']!='CHALLENGE' or f['status']!='PENDING' or t['id'] not in (f['team_a'],f['team_b']): fail(409,'Вызов недоступен')
             if action=='accept':
                 if t['id']!=f['team_b']: fail(403,'Подтверждает капитан приглашённой команды')
-                full(db,team(db,f['team_a']));full(db,team(db,f['team_b']))
+                unlocked(db,t['id'])
+                full(db,team(db,f['team_a']));rb=full(db,team(db,f['team_b']))
+                db.execute('UPDATE club_fixtures SET roster_b=? WHERE id=?',(json.dumps(rb),ident))
             db.execute('UPDATE club_fixtures SET status=? WHERE id=?',('SCHEDULED' if action=='accept' else 'CANCELLED',ident))
             return {'status':'SCHEDULED' if action=='accept' else 'CANCELLED'}
 

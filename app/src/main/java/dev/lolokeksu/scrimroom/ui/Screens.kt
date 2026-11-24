@@ -145,7 +145,7 @@ private fun StatusPill(label: String, active: Boolean = false) {
 }
 
 @Composable
-fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, onCommunity: () -> Unit) {
+fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, onCommunity: () -> Unit, onClub: () -> Unit) {
     Page {
         Eyebrow("Независимые пользовательские матчи")
         Headline("Сильные игроки.\nЧестный подбор.", "Проектируем закрытые 5×5 матчи для сообщества Wild Rift. Это неофициальный инструмент организации игр.")
@@ -172,6 +172,12 @@ fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, 
             Text("Сообщество", fontWeight = FontWeight.Bold, fontSize = 20.sp)
             Text("Друзья, приглашения на сессии и обращения к модератору.", color = Muted, fontSize = 13.sp)
             SecondaryAction("Открыть сообщество") { onCommunity() }
+        }
+        PanelCard {
+            Eyebrow("Соревнования клуба")
+            Text("Команды и турниры",fontSize=20.sp,fontWeight=FontWeight.Bold)
+            Text("Постоянные составы 5×5, встречи и сезонные кубки.",color=Muted,fontSize=13.sp)
+            SecondaryAction("Открыть соревнования") { onClub() }
         }
         PanelCard {
             Eyebrow("Локальный эксперимент")
@@ -798,4 +804,131 @@ fun CommunityScreen(state: ScrimUiState, vm: ScrimViewModel, onSessions: () -> U
             } }, confirmButton = { TextButton(onClick = { reportTo = null; vm.sendComplaint(player.matchId,player.accountId,category,note) }, enabled = !state.onlineBusy) { Text("Отправить") } },
             dismissButton = { TextButton(onClick = { reportTo = null }) { Text("Отмена") } })
     }
+}
+
+
+@Composable
+fun CompetitiveScreen(state: ScrimUiState,vm: ScrimViewModel) {
+    var section by rememberSaveable { mutableStateOf("Команда") }
+    var teamName by rememberSaveable { mutableStateOf("") }
+    var riotId by rememberSaveable { mutableStateOf("") }
+    var opponent by rememberSaveable { mutableStateOf("") }
+    var seasonId by rememberSaveable { mutableStateOf("") }
+    var start by rememberSaveable { mutableStateOf("") }
+    var confirmation by remember { mutableStateOf<Pair<String,()->Unit>?>(null) }
+    val formatter=SimpleDateFormat("dd.MM.yyyy HH:mm",Locale("ru"))
+    LaunchedEffect(state.onlineStatus,state.serverUrl) { if(state.onlineStatus=="APPROVED") vm.loadClub() }
+    Page {
+        Eyebrow("Соревновательная инфраструктура")
+        Headline("Команды и турниры","Постоянные составы и запланированные встречи. Отдельно от индивидуальной очереди и Elo.")
+        if(state.onlineStatus!="APPROVED") {
+            PanelCard { Text("Соревнования доступны после допуска игрока.",color=Muted) }
+        } else {
+            SecondaryAction("Обновить соревнования",enabled=!state.onlineBusy){vm.loadClub()}
+            ChoiceRow("Раздел",listOf("Команда","Встречи","Кубки"),section,{it}){section=it}
+            val data=state.club
+            if(data==null) Text("Данные ещё не загружены",color=Muted)
+            else {
+                val mine=data.mine
+                if(section=="Команда"){
+                    if(mine==null){
+                        PanelCard {
+                            OutlinedTextField(teamName,{teamName=it.take(48)},label={Text("Название команды")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                            PrimaryAction("Создать команду",enabled=!state.onlineBusy && teamName.trim().length>=3){vm.createClubTeam(teamName.trim())}
+                        }
+                        data.invites.forEach { i ->
+                            PanelCard {
+                                Text("Приглашение: ${i.name}",fontWeight=FontWeight.Bold)
+                                PrimaryAction("Вступить",enabled=!state.onlineBusy){vm.clubInviteAction(i.id,true)}
+                                SecondaryAction("Отклонить",enabled=!state.onlineBusy){vm.clubInviteAction(i.id,false)}
+                            }
+                        }
+                    } else {
+                        PanelCard {
+                            Text(mine.name,fontSize=22.sp,fontWeight=FontWeight.Bold)
+                            Text("${mine.members.size}/5 участников · ${mine.wins} побед из ${mine.played} встреч",color=Accent)
+                            if(mine.locked) StatusPill("Состав зафиксирован")
+                            mine.members.forEach { member ->
+                                Text(member.riotId+(if(member.id==mine.captain) " · капитан" else ""),fontWeight=FontWeight.Medium)
+                                Text(Role.entries.firstOrNull { it.name==member.role }?.title ?: member.role,color=Muted,fontSize=12.sp)
+                                if(data.captain && member.id!=mine.captain && !mine.locked){
+                                    SecondaryAction("Передать капитанство",enabled=!state.onlineBusy){confirmation="Передать управление ${member.riotId}?" to {vm.clubMemberAction(member.id,true)}}
+                                    SecondaryAction("Исключить участника",enabled=!state.onlineBusy){confirmation="Исключить ${member.riotId}?" to {vm.clubMemberAction(member.id,false)}}
+                                }
+                            }
+                            if(data.captain && mine.members.size<5 && !mine.locked){
+                                OutlinedTextField(riotId,{riotId=it.take(64)},label={Text("Riot ID участника")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                                PrimaryAction("Пригласить в команду",enabled=!state.onlineBusy && riotId.length>=5 && riotId.contains("#")){vm.inviteClubMember(riotId.trim())}
+                            }
+                            SecondaryAction("Покинуть команду",enabled=!state.onlineBusy && !mine.locked && (!data.captain || mine.members.size==1)){confirmation="Покинуть команду?" to {vm.leaveClubTeam()}}
+                        }
+                    }
+                    Eyebrow("Команды региона")
+                    data.teams.forEach { team ->
+                        PanelCard {
+                            Text(team.name,fontWeight=FontWeight.Bold)
+                            Text("${team.played} встреч · ${team.wins} побед",color=Muted)
+                            StatusPill(if(team.eligible) "Полный состав" else "Набор игроков",active=team.eligible)
+                        }
+                    }
+                }
+                if(section=="Встречи"){
+                    if(data.captain && mine?.eligible==true && !mine.locked){
+                        val now=System.currentTimeMillis()/1000
+                        val seasons=data.seasons.filter { it.ends>now+60 }
+                        val opponents=data.teams.filter { it.id!=mine.id && it.eligible && !it.locked }
+                        PanelCard {
+                            Eyebrow("Командный вызов")
+                            if(seasons.isEmpty() || opponents.isEmpty()) Text("Нужны сезон и свободная команда с полным составом.",color=Muted)
+                            else {
+                                ChoiceRow("Сезон",seasons.map{it.id},seasonId,{id->seasons.first{it.id==id}.name}){seasonId=it}
+                                ChoiceRow("Соперник",opponents.map{it.id},opponent,{id->opponents.first{it.id==id}.name}){opponent=it}
+                                OutlinedTextField(start,{start=it.take(16)},label={Text("ДД.ММ.ГГГГ ЧЧ:ММ")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                                Text("Время устройства. Капитан соперника должен принять вызов.",color=Muted,fontSize=12.sp)
+                                val parsed=runCatching { SimpleDateFormat("dd.MM.yyyy HH:mm",Locale("ru")).apply{isLenient=false}.parse(start)?.time?.div(1000) }.getOrNull()
+                                PrimaryAction("Отправить вызов",enabled=!state.onlineBusy && start.length==16 && parsed!=null && parsed>now+60 && seasons.any{it.id==seasonId} && opponents.any{it.id==opponent}){
+                                    parsed?.let{vm.createClubChallenge(opponent,seasonId,it)}
+                                }
+                            }
+                        }
+                    }
+                    data.fixtures.filter { it.cupId==null }.forEach { f ->
+                        PanelCard {
+                            Text("${f.aName} — ${f.bName}",fontWeight=FontWeight.Bold)
+                            Text(formatter.format(Date(f.starts*1000)),color=Muted)
+                            Text(clubStatus(f.status),color=Accent)
+                            f.winner?.let { Text("Победитель: "+if(it==f.a) f.aName else f.bName) }
+                            if(data.captain && mine!=null && f.status=="PENDING" && mine.id in listOf(f.a,f.b)){
+                                if(mine.id==f.b) PrimaryAction("Принять вызов",enabled=!state.onlineBusy){vm.clubChallengeAction(f.id,true)}
+                                SecondaryAction("Отклонить / отменить вызов",enabled=!state.onlineBusy){vm.clubChallengeAction(f.id,false)}
+                            }
+                        }
+                    }
+                }
+                if(section=="Кубки"){
+                    if(data.cups.isEmpty()) Text("Турниры ещё не запланированы",color=Muted)
+                    data.cups.forEach { cup ->
+                        PanelCard {
+                            Text(cup.name,fontSize=20.sp,fontWeight=FontWeight.Bold)
+                            Text(clubStatus(cup.status),color=Accent)
+                            data.fixtures.filter{it.cupId==cup.id}.sortedBy{when(it.stage){"SEMIFINAL_1"->0;"SEMIFINAL_2"->1;else->2}}.forEach { f ->
+                                Eyebrow(if(f.stage=="FINAL") "Финал" else if(f.stage=="SEMIFINAL_1") "Полуфинал 1" else "Полуфинал 2")
+                                Text("${f.aName} — ${f.bName}",fontWeight=FontWeight.Bold)
+                                Text(formatter.format(Date(f.starts*1000))+" · "+clubStatus(f.status),color=Muted,fontSize=12.sp)
+                                f.winner?.let{Text("Победитель: "+if(it==f.a) f.aName else f.bName,color=Accent)}
+                            }
+                            cup.winner?.let { winner -> Text("Чемпион: "+(data.teams.firstOrNull{it.id==winner}?.name ?: data.fixtures.firstOrNull{it.cupId==cup.id && it.stage=="FINAL"}?.let{if(it.a==winner)it.aName else it.bName} ?: "Команда"),fontWeight=FontWeight.Bold,color=Accent) }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    confirmation?.let{ (message,action) ->
+        AlertDialog(onDismissRequest={confirmation=null},title={Text(message)},confirmButton={TextButton(onClick={confirmation=null;action()},enabled=!state.onlineBusy){Text("Подтвердить")}},dismissButton={TextButton(onClick={confirmation=null}){Text("Отмена")}})
+    }
+}
+
+private fun clubStatus(status:String)=when(status){
+    "PENDING"->"Ожидает капитана";"SCHEDULED"->"Запланирована";"FINISHED"->"Завершено";"RUNNING"->"Турнир идёт";"EXPIRED"->"Время истекло";"CANCELLED"->"Отменено";else->status
 }
