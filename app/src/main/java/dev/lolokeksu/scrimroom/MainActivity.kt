@@ -1,6 +1,10 @@
 package dev.lolokeksu.scrimroom
 
 import android.os.Bundle
+import androidx.activity.compose.BackHandler
+import androidx.compose.ui.platform.LocalContext
+import dev.lolokeksu.scrimroom.data.LocalStore
+import dev.lolokeksu.scrimroom.ui.IntroScreen
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -74,15 +78,18 @@ class MainActivity : ComponentActivity() {
 @Composable
 private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
     val state by vm.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    val store = remember(context) { LocalStore(context) }
+    var intro by rememberSaveable { mutableStateOf(!store.introCompleted()) }
     var tabName by rememberSaveable { mutableStateOf(Tab.HOME.name) }
     val tab = Tab.entries.firstOrNull { it.name == tabName } ?: Tab.HOME
     val snackbar = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val onlineAvailable = state.serverUrl.isNotBlank() && state.hasOnlineAccount
+    val onlineAvailable = !intro && state.serverUrl.isNotBlank() && state.hasOnlineAccount
     LaunchedEffect(lifecycle, onlineAvailable, state.serverUrl) {
         if (onlineAvailable) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {
-                vm.refreshQueue()
+                vm.refreshQueue(background = true)
                 delay(10000L)
             }
         }
@@ -91,6 +98,11 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
         state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() }
     }
 
+    if (intro) {
+        IntroScreen(onFinish = { store.completeIntro(); intro = false })
+        return
+    }
+    BackHandler(enabled = tab != Tab.HOME) { tabName = Tab.HOME.name }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         snackbarHost = { SnackbarHost(snackbar) },
@@ -139,14 +151,16 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
                         onQueue = { tabName = Tab.QUEUE.name },
                         onCommunity = { tabName = Tab.COMMUNITY.name },
                         onClub = { tabName = Tab.CLUB.name },
-                        onSettings = { tabName = Tab.SETTINGS.name }
+                        onSettings = { tabName = Tab.SETTINGS.name },
+                        onSessions = { tabName = Tab.SESSIONS.name },
+                        onHistory = { tabName = Tab.HISTORY.name }
                     )
                     Tab.PROFILE -> ProfileScreen(state.profile, state, vm)
                     Tab.QUEUE -> QueueScreen(state, vm, onProfile = { tabName = Tab.PROFILE.name })
                     Tab.SESSIONS -> SessionsScreen(state, vm, onProfile = { tabName = Tab.PROFILE.name }, onQueue = { tabName = Tab.QUEUE.name })
                     Tab.COMMUNITY -> CommunityScreen(state, vm, onSessions = { tabName = Tab.SESSIONS.name })
                     Tab.CLUB -> CompetitiveScreen(state,vm)
-                    Tab.SETTINGS -> AccountSettingsScreen(state,vm,onProfile={tabName=Tab.PROFILE.name})
+                    Tab.SETTINGS -> AccountSettingsScreen(state,vm,onProfile={tabName=Tab.PROFILE.name},onIntro={intro=true})
                     Tab.HISTORY -> HistoryScreen(state.demoHistory, state, vm)
                 }
             }
@@ -169,10 +183,10 @@ private fun AppHeader() {
         }
         Column(modifier = Modifier.weight(1f)) {
             Text("SCRIM ROOM", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.1.sp)
-            Text("CUSTOM MATCH OPERATIONS", fontSize = 9.sp, color = Color(0xFF90999B), letterSpacing = 1.0.sp)
+            Text("КЛУБ ИГРОКОВ WILD RIFT", fontSize = 9.sp, color = Color(0xFF90999B), letterSpacing = 1.0.sp)
         }
         Text(
-            "PILOT ${BuildConfig.VERSION_NAME}", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            "RC ${BuildConfig.VERSION_NAME}", fontSize = 10.sp, fontWeight = FontWeight.Bold,
             color = Color(0xFFCCE879),
             modifier = Modifier.background(Color(0xFF20291C), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 6.dp)
         )

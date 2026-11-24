@@ -51,6 +51,9 @@ class LocalStore(context: Context) {
     }
 
 
+    fun introCompleted(): Boolean = prefs.getBoolean("intro_completed_v1", false)
+    fun completeIntro() { prefs.edit().putBoolean("intro_completed_v1", true).apply() }
+
     fun readServerUrl(): String = prefs.getString("server_url", "") ?: ""
 
     /** Switching server invalidates credentials to avoid accidentally sending them to another host. */

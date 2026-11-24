@@ -187,9 +187,12 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             onlineEvidenceCount = account.optInt("evidence_count")) }
     }
 
-    private fun onlineAction(block: suspend () -> Unit) {
+    private fun onlineAction(background: Boolean = false, block: suspend () -> Unit) {
         viewModelScope.launch {
-            if (!onlineMutex.tryLock()) return@launch
+            if (!onlineMutex.tryLock()) {
+                if (!background) _state.update { it.copy(message = "Выполняется другой запрос. Повтори действие после его завершения.") }
+                return@launch
+            }
             _state.update { it.copy(onlineBusy = true) }
             try {
                 withContext(Dispatchers.IO) { block() }
@@ -217,7 +220,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(onlineQueue = api.state(token).toOnlineQueueState()) }
     }
 
-    fun refreshQueue() = onlineAction {
+    fun refreshQueue(background: Boolean = false) = onlineAction(background) {
         val token = store.readServerToken()
         if (token.isBlank()) return@onlineAction
         val queue = RemoteClient(store.readServerUrl()).state(token).toOnlineQueueState()

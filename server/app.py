@@ -418,7 +418,7 @@ def create_app(db_path: str, admin_key: str | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.10.0', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.1', docs_url=None, redoc_url=None)
 
     def limit(scope, identity, maximum, period):
         stamp=now_ts()

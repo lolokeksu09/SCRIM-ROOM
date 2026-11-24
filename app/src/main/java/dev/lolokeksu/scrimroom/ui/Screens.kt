@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -115,7 +116,7 @@ private fun PrimaryAction(text: String, enabled: Boolean = true, onClick: () -> 
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().height(52.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
         shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color(0xFF10140A))
     ) { Text(text, fontWeight = FontWeight.ExtraBold) }
@@ -126,10 +127,10 @@ private fun SecondaryAction(text: String, enabled: Boolean = true, onClick: () -
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().height(49.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 49.dp),
         border = BorderStroke(1.dp, Outline),
         shape = RoundedCornerShape(12.dp)
-    ) { Text(text, color = Color.White) }
+    ) { Text(text) }
 }
 
 @Composable
@@ -146,59 +147,61 @@ private fun StatusPill(label: String, active: Boolean = false) {
 }
 
 @Composable
-fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, onCommunity: () -> Unit, onClub: () -> Unit, onSettings: () -> Unit) {
+fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, onCommunity: () -> Unit, onClub: () -> Unit, onSettings: () -> Unit, onSessions: () -> Unit, onHistory: () -> Unit) {
     Page {
-        Eyebrow("Независимые пользовательские матчи")
-        Headline("Сильные игроки.\nЧестный подбор.", "Проектируем закрытые 5×5 матчи для сообщества Wild Rift. Это неофициальный инструмент организации игр.")
+        Eyebrow("SCRIM ROOM / VENTRY")
+        Headline("Сильные игроки.\nЧестный подбор.", "Закрытые пользовательские матчи Wild Rift для Грандмастеров и выше.")
+        val queue = state.onlineQueue
+        val match = queue?.match
+        val approved = state.onlineStatus == "APPROVED"
         PanelCard {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                    Eyebrow("Доступ в клуб")
-                    Text("Грандмастер и выше", fontWeight = FontWeight.Bold, fontSize = 19.sp)
-                    Text("Текущий или предыдущий сезон", color = Muted, fontSize = 12.sp)
-                }
-                StatusPill(when (state.onlineStatus) {
-                    "APPROVED" -> "Допущен"
-                    "PENDING_REVIEW" -> "Модерация"
-                    "REJECTED" -> "Отказано"
-                    else -> "Не подтверждён"
-                }, active = state.onlineStatus == "APPROVED")
+            Eyebrow(if (approved) "Твой игровой статус" else "Вступление в клуб")
+            val title = when {
+                match?.status == "READY_CHECK" -> "Матч найден"
+                match?.status == "ACTIVE" -> "Матч назначен"
+                match?.status == "DISPUTED" -> "Результат на проверке"
+                queue?.queued == true -> "Поиск запущен"
+                approved -> "Готов к игре"
+                state.onlineStatus == "PENDING_REVIEW" -> "Анкета на проверке"
+                state.onlineStatus == "REJECTED" -> "Заявка отклонена"
+                state.hasOnlineAccount -> "Проверка аккаунта"
+                else -> "Грандмастер и выше"
             }
-            HorizontalDivider(color = Outline)
-            Text("Онлайн-допуск появляется только после проверки скриншотов модератором. Локальный профиль не подтверждает ранг.", color = Muted, fontSize = 12.sp)
-            PrimaryAction("Заполнить профиль") { onProfile() }
+            Text(title,fontSize=24.sp,fontWeight=FontWeight.Bold)
+            Text(when {
+                match != null -> "Открой очередь, чтобы посмотреть составы и доступные действия."
+                queue?.queued == true -> "Игроков в текущей очереди: ${queue.waiting}"
+                approved -> "Выбери обычный подбор или запланированную игровую сессию."
+                state.onlineStatus == "PENDING_REVIEW" -> "Модератор проверяет отправленные документы."
+                state.onlineStatus == "REJECTED" -> "Проверь свою анкету и документы."
+                else -> "Укажи Riot ID, две роли и добавь два скриншота. Для входа нужна проверка модератором."
+            },color=Muted,fontSize=13.sp)
+            PrimaryAction(if(approved) "Открыть очередь" else "Открыть профиль") { if(approved) onQueue() else onProfile() }
+            if(approved) SecondaryAction("Игровые сессии"){onSessions()}
         }
-        PanelCard {
-            Eyebrow("Клуб / участники")
-            Text("Сообщество", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            Text("Друзья, приглашения на сессии и обращения к модератору.", color = Muted, fontSize = 13.sp)
-            SecondaryAction("Открыть сообщество") { onCommunity() }
+        Eyebrow("Играть")
+        HomeEntry("Расписание","Предварительная запись на игровые окна.","Открыть расписание",onSessions)
+        HomeEntry("Команды и турниры","Постоянные составы, сезонные встречи и кубки.","Открыть соревнования",onClub)
+        Eyebrow("Участник")
+        HomeEntry("Сообщество","Друзья, приглашения и обращения к модератору.","Открыть сообщество",onCommunity)
+        HomeEntry("Личная история","Подтверждённые матчи и статистика по ролям.","Открыть историю",onHistory)
+        HomeEntry("Настройки","Восстановление доступа, приватность и уведомления.","Открыть настройки",onSettings)
+        if(!approved) {
+            Eyebrow("Познакомиться с подбором")
+            Text("Без аккаунта можно посмотреть отдельную демонстрацию на вымышленных игроках.",color=Muted,fontSize=12.sp)
+            SecondaryAction("Проверить демо-подбор"){onQueue()}
         }
-        PanelCard {
-            Eyebrow("Соревнования клуба")
-            Text("Команды и турниры",fontSize=20.sp,fontWeight=FontWeight.Bold)
-            Text("Постоянные составы 5×5, встречи и сезонные кубки.",color=Muted,fontSize=13.sp)
-            SecondaryAction("Открыть соревнования") { onClub() }
-        }
-        PanelCard {
-            Eyebrow("Аккаунт и уведомления")
-            Text("Настройки",fontSize=20.sp,fontWeight=FontWeight.Bold)
-            Text("Восстановление доступа, приватность и уведомления.",color=Muted,fontSize=13.sp)
-            SecondaryAction("Открыть настройки") {onSettings()}
-        }
-        PanelCard {
-            Eyebrow("Локальный эксперимент")
-            Text("Алгоритм подбора 5 × 5", fontWeight = FontWeight.Bold, fontSize = 20.sp)
-            Text("Двенадцать вымышленных участников, две предпочтительные роли и сравнение силы противоположных позиций.", color = Muted, fontSize = 13.sp)
-            SecondaryAction("Проверить демо-подбор") { onQueue() }
-        }
-        PanelCard {
-            Eyebrow("Состояние разработки")
-            Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                Metric("${state.demoHistory.size}", "Демо-матчей")
-                Metric("${state.profile.screenshots.size}", "Скриншотов")
-                Metric(if (state.onlineQueue?.match != null) "1" else "0", "Текущий матч")
-            }
+        Text("Независимый клуб. Не связан с Riot Games, не заменяет рейтинговую очередь.",color=Muted,fontSize=11.sp)
+    }
+}
+
+@Composable
+private fun HomeEntry(title:String,description:String,action:String,onClick:()->Unit) {
+    Surface(shape=RoundedCornerShape(12.dp),color=Panel,modifier=Modifier.fillMaxWidth()) {
+        Column(modifier=Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
+            Text(title,fontSize=17.sp,fontWeight=FontWeight.Bold)
+            Text(description,color=Muted,fontSize=12.sp)
+            TextButton(onClick=onClick,modifier=Modifier.align(Alignment.End)){Text(action)}
         }
     }
 }
@@ -251,9 +254,9 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
     val eligible = currentRank.level >= Rank.GRANDMASTER.level || previousRank.level >= Rank.GRANDMASTER.level
     Page {
         Eyebrow("Участник / регистрация")
-        Headline("Профиль игрока", "Два этапа: сохранить данные на устройстве и отдельно отправить заявку на пилотный сервер.")
+        Headline("Профиль игрока", "Укажи игровые данные и отправь заявку для допуска в клуб.")
         PanelCard {
-            Eyebrow("Пилотный сервер")
+            Eyebrow("Подключение к клубу")
             OutlinedTextField(
                 value = serverAddress,
                 onValueChange = { serverAddress = it.take(200) },
@@ -375,7 +378,7 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
     val demoTeamsRequester = remember { BringIntoViewRequester() }
     Page {
         Eyebrow("Подбор / закрытые матчи")
-        Headline("Очередь 5 × 5", "Онлайн-матчи на пилотном сервере и отдельный локальный деморежим.")
+        Headline("Очередь 5 × 5", "Подбор по ролям и внутренней оценке силы. Демонстрация доступна отдельно ниже.")
         PanelCard {
             Eyebrow("Онлайн-очередь")
             when {
@@ -954,7 +957,7 @@ private fun clubStatus(status:String)=when(status){
 
 
 @Composable
-fun AccountSettingsScreen(state:ScrimUiState,vm:ScrimViewModel,onProfile:()->Unit) {
+fun AccountSettingsScreen(state:ScrimUiState,vm:ScrimViewModel,onProfile:()->Unit,onIntro:()->Unit) {
     val context=androidx.compose.ui.platform.LocalContext.current
     var input by remember {mutableStateOf("")}
     var confirm by remember {mutableStateOf("")}
@@ -966,6 +969,7 @@ fun AccountSettingsScreen(state:ScrimUiState,vm:ScrimViewModel,onProfile:()->Uni
     Page {
         Eyebrow("Управление аккаунтом")
         Headline("Настройки аккаунта","Безопасность, приватность и уведомления клуба.")
+        SecondaryAction("О SCRIM ROOM"){onIntro()}
         PanelCard {
             Eyebrow("Восстановление доступа")
             if(state.hasOnlineAccount){

@@ -14,6 +14,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.captureToImage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import org.junit.Before
+import androidx.compose.ui.test.onAllNodesWithText
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -25,6 +27,16 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class ScrimRoomUiTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+
+    @Before fun finishIntroductionIfNeeded() {
+        if (compose.onAllNodesWithText("Пропустить").fetchSemanticsNodes().isNotEmpty()) {
+            compose.onNodeWithText("Далее").performScrollTo().performClick()
+            compose.onNodeWithText("Матчи и роли").assertExists()
+            compose.onNodeWithText("Далее").performScrollTo().performClick()
+            compose.onNodeWithText("Твой клуб").assertExists()
+            compose.onNodeWithText("Начать").performScrollTo().performClick()
+        }
+    }
 
     private fun shot(name: String) {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -42,7 +54,7 @@ class ScrimRoomUiTest {
 
     @Test fun navigationAndOfflineQueue() {
         compose.onNodeWithText("SCRIM ROOM").assertExists()
-        compose.onNodeWithText("PILOT ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
+        compose.onNodeWithText("RC ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
         compose.onNodeWithText("Сильные игроки.\nЧестный подбор.").assertExists()
         shot("01-home")
         compose.onNodeWithText("Открыть сообщество").performScrollTo().performClick()
@@ -59,6 +71,10 @@ class ScrimRoomUiTest {
         compose.onNodeWithText("Настройки аккаунта").assertIsDisplayed()
         compose.onNodeWithText("Восстановить доступ").assertIsNotEnabled()
         shot("12-account-settings")
+        compose.onNodeWithText("О SCRIM ROOM").performScrollTo().performClick()
+        compose.onNodeWithText("Закрытый клуб").assertExists()
+        shot("13-intro")
+        compose.onNodeWithText("Пропустить").performScrollTo().performClick()
         compose.onNodeWithText("Очередь").performClick()
         compose.onNodeWithText("Очередь 5 × 5").assertIsDisplayed()
         compose.onNodeWithText("Вымышленные игроки").assertExists()

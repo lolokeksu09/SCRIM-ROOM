@@ -1,8 +1,8 @@
-# SCRIM ROOM — Android + pilot server 0.4.0
+# SCRIM ROOM — 1.0.0-rc.1
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
-## Delivered in 0.4.0
+## Original 0.4.0 baseline (historical; see later updates below)
 
 ### Native Android client
 - Kotlin / Jetpack Compose, AMOLED UI, minSdk 26, targetSdk 35.
@@ -90,7 +90,7 @@ For screenshot retrieval use `GET /v1/admin/accounts/{account_id}/evidence/{slot
 
 - **No Riot Sign On** or proof that a submitted Riot ID belongs to the registrant. The moderator must confirm independently.
 - No end-to-end custom lobby automation or Riot match result API. Teams enter Wild Rift custom games manually.
-- No public leaderboard, push notification or recovery across device reinstall. Results require captain consensus or moderator resolution.
+- No public individual leaderboard or guaranteed push delivery; recovery codes are available since 0.10.0. Results require captain consensus or moderator resolution.
 - The server is designed for a **controlled, invited pilot**, not arbitrary public traffic. Rate limiting, abuse protection, audit logging, account recovery, retention/deletion policy, are still required before an unrestricted launch.
 - If login token is lost, the user cannot restore the same pilot account from another device yet.
 - Screenshots are stored in a private SQLite volume, accessible to an administrator. Do not deploy without privacy disclosures, backup controls and a data retention plan.
@@ -144,3 +144,6 @@ Recovery codes are random 256-bit secrets, shown once; only SHA-256 digests are 
 
 ### Backup and restore
 Run inside the server container as the service owner: `python -m server.backup /data/backups/scrim-$(date -u +%Y%m%dT%H%M%SZ).sqlite3`. The SQLite backup API produces a consistent copy with mode 0600 and verifies quick_check; existing destinations cannot be overwritten. Backups contain private screenshots and account/token hashes: restrict access, encrypt off-host copies and define retention. To restore, stop service, preserve current database and WAL/SHM files in a separate protected location, validate a copy of backup with integrity_check, then replace the database offline with correct ownership and restart. Restoring a past snapshot can resurrect old tokens/recovery codes and lose newer writes: review credential rotation and account state before reopening access. No automatic backup schedule or actual deployment is performed by this patch.
+
+## 1.0.0-rc.1
+Three first-run intro pages, state-based home, grouped navigation, replayable introduction, back navigation and improved text scaling on action buttons. Concurrent user requests now report a busy state instead of silently dropping actions. Docker readiness and resource restrictions are configured. Manual release workflow requires an existing trusted release key and its independently recorded certificate fingerprint; debug artifacts are not release builds. See [release gate and deployment runbook](docs/RELEASE-RC.md). Not yet a production deployment.
