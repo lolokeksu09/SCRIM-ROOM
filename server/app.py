@@ -256,10 +256,13 @@ def _match_info(db, match_id, viewer_id=None, moderator=False):
     own = next((p for p in players if p['account_id']==viewer_id), None)
     captain = own is not None and own['role']=='BARON'
     own_report = next((r['winner'] for r in reports if captain and r['side']==own['side']), None)
+    from server.match_experience import match_details
+    extra = match_details(db,match,own,moderator,now_ts())
     return {
         'id': match['id'], 'status': match['status'], 'region': match['region'],
         'session_id': (lambda r:r['session_id'] if r else None)(db.execute('SELECT session_id FROM match_sessions WHERE match_id=?',(match_id,)).fetchone()),
         'is_captain': captain, 'own_report': own_report, 'report_count': len(reports),
+        **extra,
         'reports': {r['side']:r['winner'] for r in reports} if moderator else {},
         'result': dict(result) if result else None,
         'ready_count': sum(x['ready'] for x in players),
@@ -403,7 +406,7 @@ def create_app(db_path: str, admin_key: str | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.6.0', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.7.0', docs_url=None, redoc_url=None)
 
     def limit(scope, identity, maximum, period):
         stamp=now_ts()
@@ -680,16 +683,17 @@ def create_app(db_path: str, admin_key: str | None = None):
     @app.post('/v1/matches/{match_id}/ready')
     def ready(match_id:str,token=Depends(token_header)):
         with store.transaction(write=True) as db:
+            _expire_ready_checks(db)
+        with store.transaction(write=True) as db:
             user,mp=match_member(db,token,match_id)
             match=db.execute('SELECT status,deadline FROM matches WHERE id=?',(match_id,)).fetchone()
-            if match['status']!='READY_CHECK' or match['deadline']<now_ts():
-                _expire_ready_checks(db)
+            if match['status']!='READY_CHECK' or match['deadline']<=now_ts():
                 raise HTTPException(409,'Проверка готовности завершена')
             db.execute('UPDATE match_players SET ready=1 WHERE match_id=? AND account_id=?',(match_id,user['id']))
             count=db.execute('SELECT sum(ready) FROM match_players WHERE match_id=?',(match_id,)).fetchone()[0]
             if count==10:
                 db.execute("UPDATE matches SET status='ACTIVE' WHERE id=?",(match_id,))
-            return _match_info(db,match_id)
+            return _match_info(db,match_id,viewer_id=user['id'])
 
     @app.post('/v1/matches/{match_id}/decline')
     def decline(match_id:str,token=Depends(token_header)):
@@ -737,7 +741,7 @@ def create_app(db_path: str, admin_key: str | None = None):
         with store.transaction() as db:
             user=get_user(db,token)
             rows=db.execute('''SELECT r.match_id,r.winner,r.source,r.resolved_at,mp.side,
-                 rc.before_rating,rc.after_rating FROM match_results r
+                 rc.before_rating,rc.after_rating,mp.role FROM match_results r
                  JOIN match_players mp ON mp.match_id=r.match_id
                  LEFT JOIN rating_changes rc ON rc.match_id=r.match_id AND rc.account_id=mp.account_id
                  WHERE mp.account_id=? ORDER BY r.resolved_at DESC,r.match_id DESC LIMIT 50''',(user['id'],)).fetchall()
@@ -815,6 +819,8 @@ def create_app(db_path: str, admin_key: str | None = None):
 
     from server.community import install_community
     install_community(app, store, token_header, admin_auth, limit, get_user, now_ts, session_status)
+    from server.match_experience import install_match_experience
+    install_match_experience(app,store,token_header,admin_auth,limit,match_member,get_user,now_ts,_read_safe_image,MAX_IMAGE_BYTES)
     return app
 
 
