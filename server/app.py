@@ -20,7 +20,7 @@ from contextlib import contextmanager, asynccontextmanager
 from typing import Literal
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, Request
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, Request, Query
 from fastapi.responses import Response, FileResponse, JSONResponse
 from fastapi.exceptions import RequestValidationError
 from server.request_guard import RequestBodyLimit
@@ -33,6 +33,7 @@ from server.ocr import recognize_stats, OcrUnavailable
 from server.competition_guard import reserved_players, enforce_reservations, check_fixture_conflict
 from server.result_guard import review_reason, result_review_reason
 from server.moderator_auth import ModeratorCredentials
+from server.performance import PerformanceWindow
 
 RANK_VALUES = {'BELOW_MASTER': 0, 'MASTER': 1, 'GRANDMASTER': 2, 'CHALLENGER': 3, 'SOVEREIGN': 4}
 RANK_SEEDS = {'GRANDMASTER': 1600, 'CHALLENGER': 1800, 'SOVEREIGN': 2000}
@@ -512,6 +513,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             except asyncio.CancelledError: pass
     app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.6', docs_url=None, redoc_url=None, openapi_url=None,lifespan=lifespan)
     app.add_middleware(RequestBodyLimit)
+    app.state.performance=PerformanceWindow()
     with store.transaction(write=True) as db:
         db.execute('CREATE TABLE IF NOT EXISTS result_review_flags(match_id TEXT PRIMARY KEY REFERENCES matches(id),reason TEXT NOT NULL)')
         db.execute('CREATE TABLE IF NOT EXISTS result_moderation_notes(match_id TEXT PRIMARY KEY REFERENCES matches(id),note TEXT NOT NULL)')
@@ -550,18 +552,24 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
 
     @app.middleware('http')
     async def protect_admin_responses(request: Request, call_next):
-        response = await call_next(request)
+        started=time.monotonic()
+        try:
+            response = await call_next(request)
+        except Exception:
+            app.state.performance.record(request.url.path,500,time.monotonic()-started)
+            raise
         if request.url.path.startswith('/v1/'):
             response.headers['Cache-Control']='no-store'
         if getattr(request.state,'admin_authorized',False) and request.method in ('POST','PUT','PATCH','DELETE'):
             from server.operations import audit_request
-            audit_request(store,request,response.status_code,now_ts())
+            await asyncio.to_thread(audit_request,store,request,response.status_code,now_ts())
         if request.url.path == '/admin' or request.url.path.startswith(('/admin/', '/v1/admin/')):
             response.headers['Cache-Control'] = 'no-store'
             response.headers['X-Content-Type-Options'] = 'nosniff'
             response.headers['X-Frame-Options'] = 'DENY'
             response.headers['Referrer-Policy'] = 'no-referrer'
             response.headers['Content-Security-Policy'] = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        app.state.performance.record(request.url.path,response.status_code,time.monotonic()-started)
         return response
 
     @app.get('/admin', include_in_schema=False)
@@ -918,11 +926,35 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
               ORDER BY m.created_at DESC,m.rowid DESC LIMIT 50""").fetchall()
             return {'matches':[dict(row,quality=load_quality(db,row['id'],full=True)) for row in rows]}
 
+    def review_account(db,row):
+        return dict(account_dict(db,row),review_revision=review_revision(db,row),duplicate_slots=duplicate_slots(db,row['id']))
+
     @app.get('/v1/admin/accounts', dependencies=[Depends(admin_auth)])
     def admin_accounts():
+        # Compatibility endpoint: bounded first page. The browser uses the paged route.
         with store.transaction() as db:
-            rows=db.execute('SELECT * FROM accounts ORDER BY created_at DESC').fetchall()
-            return [dict(account_dict(db,row), review_revision=review_revision(db,row), duplicate_slots=duplicate_slots(db,row['id'])) for row in rows]
+            rows=db.execute('SELECT * FROM accounts ORDER BY created_at DESC,id DESC LIMIT 100').fetchall()
+            return [review_account(db,row) for row in rows]
+
+    @app.get('/v1/admin/accounts/page',dependencies=[Depends(admin_auth)])
+    def admin_accounts_page(status:Literal['ALL','PENDING_REVIEW','APPROVED','REJECTED']='ALL',q:str=Query('',max_length=100),limit:int=Query(30,ge=1,le=100),offset:int=Query(0,ge=0,le=1000000)):
+        clauses=[];params=[]
+        if status!='ALL':clauses.append('status=?');params.append(status)
+        if q.strip():clauses.append("instr(lower(riot_id||' '||region),lower(?))>0");params.append(q.strip())
+        where=' WHERE '+' AND '.join(clauses) if clauses else ''
+        with store.transaction() as db:
+            counts={r['status']:r['n'] for r in db.execute('SELECT status,count(*) AS n FROM accounts GROUP BY status')}
+            total=db.execute('SELECT count(*) FROM accounts'+where,params).fetchone()[0]
+            offset=min(offset,((total-1)//limit)*limit) if total else 0
+            rows=db.execute('SELECT * FROM accounts'+where+' ORDER BY created_at DESC,id DESC LIMIT ? OFFSET ?',(*params,limit,offset)).fetchall()
+            return {'items':[review_account(db,row) for row in rows],'total':total,'offset':offset,'limit':limit,'counts':counts}
+
+    @app.get('/v1/admin/accounts/{account_id}',dependencies=[Depends(admin_auth)])
+    def admin_account_detail(account_id:str):
+        with store.transaction() as db:
+            row=db.execute('SELECT * FROM accounts WHERE id=?',(account_id,)).fetchone()
+            if not row: raise HTTPException(404,'Участник не найден')
+            return review_account(db,row)
 
     @app.get('/v1/admin/matches', dependencies=[Depends(admin_auth)])
     def admin_matches():

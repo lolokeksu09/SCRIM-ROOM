@@ -55,6 +55,7 @@ with tempfile.TemporaryDirectory() as tmp:
                 page.locator("#search").fill("not-found")
                 expect(page.locator("#list")).to_contain_text("Нет заявок")
                 page.locator("#search").clear()
+                expect(page.locator("#pageInfo")).to_have_text("1–1 / 1")
                 page.locator("#list .account").first.click()
                 expect(page.locator("#detail h2").first).to_have_text("Pilot901#EUW")
                 expect(page.locator(".evidence img")).to_have_count(2)

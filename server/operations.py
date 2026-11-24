@@ -135,4 +135,4 @@ def install_operations(app,store,token_header,admin_auth,limit,get_user,now,acco
             for table in ('accounts','queue','matches','club_teams','complaints'):
                 counts[table]=db.execute('SELECT count(*) FROM '+table).fetchone()[0]
             audits=[dict(r) for r in db.execute('SELECT at,method,route,resource,status,actor FROM admin_audit ORDER BY id DESC LIMIT 100')]
-            return {'database':'ready','counts':counts,'audit':audits}
+            return {'database':'ready','counts':counts,'audit':audits,'performance':app.state.performance.snapshot()}
