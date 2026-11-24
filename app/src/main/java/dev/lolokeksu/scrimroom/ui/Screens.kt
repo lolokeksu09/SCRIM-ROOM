@@ -24,6 +24,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Card
@@ -421,7 +423,7 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
 @Composable
 private fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boolean) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(if (match.status == "READY_CHECK") "Матч найден · подтверждение" else "Матч подтверждён",
+        Text(when(match.status) { "READY_CHECK" -> "Матч найден · подтверждение"; "DISPUTED" -> "Результат оспаривается"; else -> "Матч подтверждён" },
             fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Text("Готово игроков: ${match.readyCount}/10", color = Accent, fontSize = 13.sp)
         if (match.status == "READY_CHECK") {
@@ -432,9 +434,22 @@ private fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boolea
         OnlineTeamPanel("Синяя команда", match.blue, Blue)
         OnlineTeamPanel("Красная команда", match.red, Red)
         if (match.status == "ACTIVE") {
-            Text("Создайте пользовательское лобби в Wild Rift вручную и пригласите участников. Клиент не запускает игру и не подтверждает результаты автоматически.",
-                color = Muted, fontSize = 12.sp)
+            Text("Создайте пользовательское лобби вручную. После игры капитаны барон-линии сообщают победителя.", color = Muted, fontSize = 12.sp)
+            Text("Подтверждений результата: ${match.reportCount}/2", color = Accent, fontSize = 13.sp)
+            if (match.isCaptain && match.ownReport == null) {
+                var selected by rememberSaveable(match.id) { mutableStateOf<Side?>(null) }
+                PrimaryAction("Победа синей команды", enabled = !busy) { selected = Side.BLUE }
+                SecondaryAction("Победа красной команды", enabled = !busy) { selected = Side.RED }
+                selected?.let { winner ->
+                    AlertDialog(onDismissRequest = { selected = null },
+                        title = { Text("Подтвердить результат?") },
+                        text = { Text("Победили ${if (winner == Side.BLUE) "синие" else "красные"}. После отправки решение нельзя изменить самостоятельно.") },
+                        confirmButton = { TextButton(onClick = { selected = null; vm.reportOnlineResult(match.id, winner) }, enabled = !busy) { Text("Подтвердить") } },
+                        dismissButton = { TextButton(onClick = { selected = null }) { Text("Отмена") } })
+                }
+            } else Text(if (match.isCaptain) "Твой результат отправлен" else "Результат отправляют капитаны", color = Muted, fontSize = 12.sp)
         }
+        if (match.status == "DISPUTED") Text("Капитаны указали разных победителей. Матч ожидает модерации; новый поиск пока недоступен.", color = Red, fontSize = 13.sp)
     }
 }
 
@@ -444,7 +459,7 @@ private fun OnlineTeamPanel(title: String, players: List<OnlinePlayer>, color: C
         Text(title, color = color, fontWeight = FontWeight.Bold, fontSize = 14.sp)
         players.forEach { participant ->
             Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(participant.role, color = Muted, fontSize = 10.sp, modifier = Modifier.width(80.dp))
+                Text(if (participant.role == "BARON") "Барон · К" else participant.role, color = Muted, fontSize = 10.sp, modifier = Modifier.width(80.dp))
                 Text(participant.riotId, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1,
                     overflow = TextOverflow.Ellipsis)
                 Text(if (participant.ready) "✓" else "·", color = if (participant.ready) Accent else Muted)
@@ -493,8 +508,23 @@ private fun TeamPanel(title: String, entries: List<AssignedPlayer>, average: Int
 }
 
 @Composable
-fun HistoryScreen(results: List<DemoResult>) {
+fun HistoryScreen(results: List<DemoResult>, state: ScrimUiState, vm: ScrimViewModel) {
+    LaunchedEffect(state.hasOnlineAccount) { if (state.hasOnlineAccount) vm.loadOnlineResults() }
     Page {
+        if (state.hasOnlineAccount) {
+            Eyebrow("Подтверждённые матчи")
+            PanelCard {
+                SecondaryAction("Обновить результаты", enabled = !state.onlineBusy) { vm.loadOnlineResults() }
+                val online = state.onlineResults
+                if (online == null) Text("Результаты ещё не загружены", color = Muted, fontSize = 13.sp)
+                else if (online.isEmpty()) Text("Нет подтверждённых матчей", color = Muted, fontSize = 13.sp)
+                else online.forEach { result ->
+                    Text(when { result.winner == "VOID" -> "Аннулирован"; result.winner == result.side -> "Победа"; else -> "Поражение" }, fontWeight = FontWeight.Bold)
+                    Text(SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("ru")).format(Date(result.resolvedAt * 1000)), color = Muted, fontSize = 12.sp)
+                    HorizontalDivider(color = Outline)
+                }
+            }
+        }
         Eyebrow("История / только демо")
         Headline("Матчи", "Результаты тестовых составов хранятся локально на устройстве. Это не официальная статистика игры.")
         if (results.isEmpty()) {

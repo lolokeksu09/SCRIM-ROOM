@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import dev.lolokeksu.scrimroom.data.LocalStore
 import dev.lolokeksu.scrimroom.data.OnlineQueueState
+import dev.lolokeksu.scrimroom.data.OnlineResult
 import dev.lolokeksu.scrimroom.data.RemoteClient
 import dev.lolokeksu.scrimroom.data.toOnlineQueueState
 import dev.lolokeksu.scrimroom.match.MatchEngine
@@ -37,6 +38,7 @@ data class ScrimUiState(
     val onlineStatus: String? = null,
     val onlineEvidenceCount: Int = 0,
     val onlineQueue: OnlineQueueState? = null,
+    val onlineResults: List<OnlineResult>? = null,
     val onlineBusy: Boolean = false,
     val message: String? = null
 )
@@ -75,6 +77,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             hasOnlineAccount = if (changed) false else it.hasOnlineAccount,
             onlineStatus = if (changed) null else it.onlineStatus,
             onlineQueue = if (changed) null else it.onlineQueue,
+            onlineResults = if (changed) null else it.onlineResults,
             onlineEvidenceCount = if (changed) 0 else it.onlineEvidenceCount,
             message = if (changed) "HTTPS-сервер сохранён. Привязка к прежнему серверу сброшена." else "Адрес сервера сохранён."
         ) }
@@ -213,6 +216,25 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         val token = store.readServerToken()
         api.decline(token, matchId)
         _state.update { it.copy(onlineQueue = api.state(token).toOnlineQueueState()) }
+    }
+
+    fun reportOnlineResult(matchId: String, winner: Side) = onlineAction {
+        val api = RemoteClient(store.readServerUrl())
+        val token = store.readServerToken()
+        val response = api.reportResult(token, matchId, winner.name)
+        val queue = api.state(token).toOnlineQueueState()
+        _state.update { it.copy(onlineQueue = queue, message = when(response.optString("status")) {
+            "CLOSED" -> "Результат подтверждён"
+            "DISPUTED" -> "Результаты не совпали. Требуется решение модератора"
+            else -> "Результат отправлен. Ожидаем второго капитана"
+        }) }
+    }
+
+    fun loadOnlineResults() = onlineAction {
+        val token = store.readServerToken()
+        if (token.isBlank()) return@onlineAction
+        val results = RemoteClient(store.readServerUrl()).results(token)
+        _state.update { it.copy(onlineResults = results) }
     }
 
     fun persistDocumentUris(uris: List<Uri>): List<String> {

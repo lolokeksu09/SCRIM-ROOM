@@ -1,8 +1,8 @@
-# SCRIM ROOM — Android + pilot server 0.2.2
+# SCRIM ROOM — Android + pilot server 0.3.0
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
-## Delivered in 0.2.2
+## Delivered in 0.3.0
 
 ### Native Android client
 - Kotlin / Jetpack Compose, AMOLED UI, minSdk 26, targetSdk 35.
@@ -107,7 +107,7 @@ Pure Kotlin engine has 19 standalone checks. Server API currently has 10 integra
 
 ## Roadmap 0.3
 
-- Real result confirmation by both captains and moderator conflict resolution.
+- Result evidence uploads and moderator audit trail.
 - Evidence deletion / retention controls and moderator audit trail.
 - Observability, rate limiting, access recovery and secure invite-only pilot controls.
 - APK compile/run evidence and a release-signed artifact (with a key belonging to the project owner).

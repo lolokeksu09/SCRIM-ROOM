@@ -111,7 +111,7 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
                     )
                     Tab.PROFILE -> ProfileScreen(state.profile, state, vm)
                     Tab.QUEUE -> QueueScreen(state, vm, onProfile = { tabName = Tab.PROFILE.name })
-                    Tab.HISTORY -> HistoryScreen(state.demoHistory)
+                    Tab.HISTORY -> HistoryScreen(state.demoHistory, state, vm)
                 }
             }
         }

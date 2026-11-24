@@ -74,6 +74,17 @@ class RemoteClient(baseInput: String) {
     fun ready(token: String, matchId: String): JSONObject = jsonRequest("POST", "/v1/matches/$matchId/ready", token)
     fun decline(token: String, matchId: String): JSONObject = jsonRequest("POST", "/v1/matches/$matchId/decline", token)
 
+    fun reportResult(token: String, matchId: String, winner: String): JSONObject =
+        jsonRequest("POST", "/v1/matches/$matchId/result", token, JSONObject().put("winner", winner))
+    fun results(token: String): List<OnlineResult> {
+        val rows = jsonRequest("GET", "/v1/me/results", token).getJSONArray("results")
+        return (0 until rows.length()).map { i ->
+            val row = rows.getJSONObject(i)
+            OnlineResult(row.getString("match_id"), row.getString("winner"), row.getString("side"),
+                row.getLong("resolved_at"))
+        }
+    }
+
     fun uploadEvidence(token: String, resolver: ContentResolver, uri: Uri): JSONObject {
         val mime = resolver.getType(uri)
         require(mime in setOf("image/png", "image/jpeg", "image/webp")) {
@@ -127,8 +138,13 @@ data class OnlineMatch(
     val deadline: Long,
     val readyCount: Int,
     val blue: List<OnlinePlayer>,
-    val red: List<OnlinePlayer>
+    val red: List<OnlinePlayer>,
+    val isCaptain: Boolean = false,
+    val ownReport: String? = null,
+    val reportCount: Int = 0
 )
+
+data class OnlineResult(val id: String, val winner: String, val side: String, val resolvedAt: Long)
 
 data class OnlineQueueState(
     val accountStatus: String,
@@ -148,7 +164,9 @@ fun JSONObject.toOnlineQueueState(): OnlineQueueState {
         matchObj.optString("id"), matchObj.optString("status"),
         matchObj.optLong("deadline"), matchObj.optInt("ready_count"),
         (matchObj.optJSONArray("blue") ?: org.json.JSONArray()).toPlayers(),
-        (matchObj.optJSONArray("red") ?: org.json.JSONArray()).toPlayers()
+        (matchObj.optJSONArray("red") ?: org.json.JSONArray()).toPlayers(),
+        matchObj.optBoolean("is_captain"), matchObj.optString("own_report").takeUnless { it.isBlank() || it == "null" },
+        matchObj.optInt("report_count")
     )
     return OnlineQueueState(optString("account_status"), optBoolean("queued"),
         optInt("waiting_in_region"), match)
