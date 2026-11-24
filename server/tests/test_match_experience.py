@@ -53,3 +53,25 @@ def test_void_not_counted_for_calibration(tmp_path):
         stats=c.get('/v1/me/statistics',headers=auth(b)).json()
         assert stats['voids']==1 and stats['played']==0 and stats['win_rate'] is None
         assert stats['calibration']['completed']==0
+
+
+def test_ready_deadline_is_inclusive_and_persists_cancellation(tmp_path,monkeypatch):
+    import server.app as module
+    from server.tests.test_api import approve
+    stamp=module.now_ts()
+    monkeypatch.setattr(module,'now_ts',lambda:stamp)
+    with TestClient(create_app(str(tmp_path/'deadline.db'),admin_key=ADMIN)) as c:
+        roles=['BARON','JUNGLE','MID','DRAGON','SUPPORT']
+        users=[register(c,2600+i,role=roles[i%5],secondary=roles[(i+1)%5]) for i in range(10)]
+        for u in users:
+            approve(c,u)
+            assert c.post('/v1/queue/join',headers=auth(u)).status_code==200
+        m=c.get('/v1/queue/state',headers=auth(users[0])).json()['match']
+        assert m['server_now']==stamp and not m['own_ready']
+        url=f"/v1/matches/{m['id']}/ready"
+        assert c.post(url,headers=auth(users[0])).json()['own_ready']
+        monkeypatch.setattr(module,'now_ts',lambda:m['deadline'])
+        assert c.post(url,headers=auth(users[1])).status_code==409
+        state=c.get('/v1/queue/state',headers=auth(users[1])).json()
+        assert state['match'] is None and state['discipline']['incidents']==1
+        assert c.get('/v1/queue/state',headers=auth(users[0])).json()['queued']

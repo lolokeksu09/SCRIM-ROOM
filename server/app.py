@@ -340,7 +340,7 @@ def requeue_match_player(db,mid,player):
 
 
 def _expire_ready_checks(db):
-    expired = db.execute("SELECT id FROM matches WHERE status='READY_CHECK' AND deadline<?", (now_ts(),)).fetchall()
+    expired = db.execute("SELECT id FROM matches WHERE status='READY_CHECK' AND deadline<=?", (now_ts(),)).fetchall()
     for item in expired:
         mid = item['id']
         db.execute("UPDATE matches SET status='CANCELLED' WHERE id=?", (mid,))

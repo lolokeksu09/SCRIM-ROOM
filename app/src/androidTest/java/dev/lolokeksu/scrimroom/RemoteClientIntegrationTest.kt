@@ -105,7 +105,11 @@ class RemoteClientIntegrationTest {
             assertEquals(roles.map { it.name }.toSet(), found.blue.map { it.role }.toSet())
             assertEquals(roles.map { it.name }.toSet(), found.red.map { it.role }.toSet())
             assertEquals(10, (found.blue + found.red).map { it.riotId }.toSet().size)
-            tokens.forEach { api.ready(it, found.id) }
+            assertTrue(found.deadline > found.serverNow)
+            assertFalse(found.ownReady)
+            api.ready(tokens.first(),found.id)
+            assertTrue(checkNotNull(api.state(tokens.first()).toOnlineQueueState().match).ownReady)
+            tokens.drop(1).forEach { api.ready(it, found.id) }
             val active = checkNotNull(api.state(tokens.first()).toOnlineQueueState().match)
             assertEquals("ACTIVE", active.status)
             assertEquals(10, active.readyCount)
@@ -113,6 +117,16 @@ class RemoteClientIntegrationTest {
             // Determine the captains from server-assigned positions, not registration order.
             val captains = tokens.filter { api.state(it).toOnlineQueueState().match?.isCaptain == true }
             assertEquals(2, captains.size)
+            val host = captains.single { api.state(it).toOnlineQueueState().match?.lobbyHost == true }
+            api.setLobby(host,found.id,"CI practice room")
+            assertEquals("CI practice room",api.state(tokens.last()).toOnlineQueueState().match?.lobbyRoom)
+            tokens.forEach { api.arriveLobby(it,found.id) }
+            val arrived = checkNotNull(api.state(host).toOnlineQueueState().match)
+            assertEquals(10,arrived.lobbyArrivals)
+            assertTrue(arrived.ownArrived)
+            captains.forEach { api.uploadResultEvidence(it,found.id,resolver,images.first()) }
+            assertEquals(2,api.state(host).toOnlineQueueState().match?.evidenceCount)
+            assertTrue(checkNotNull(api.state(host).toOnlineQueueState().match).ownEvidence)
             val nonCaptain = tokens.first { it !in captains }
             val deniedReport = runCatching { api.reportResult(nonCaptain, found.id, "BLUE") }.exceptionOrNull() as? RemoteException
             assertEquals(403, deniedReport?.statusCode)
@@ -127,6 +141,12 @@ class RemoteClientIntegrationTest {
                 assertEquals(1, results.size)
                 assertEquals(found.id, results[0].id)
                 assertEquals("BLUE", results[0].winner)
+                val stats=api.statistics(token)
+                assertEquals(1,stats.played)
+                assertEquals(1,stats.calibrated)
+                assertEquals(1,stats.roles.sumOf { it.played })
+                assertEquals(1,stats.wins+stats.losses)
+                assertTrue(results[0].role.isNotBlank())
                 assertNull(api.state(token).toOnlineQueueState().match)
             }
             // Social operations use the real authenticated Android HTTP client.
