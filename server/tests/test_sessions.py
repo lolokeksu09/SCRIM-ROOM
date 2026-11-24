@@ -60,3 +60,23 @@ def test_withdraw_and_expiry(tmp_path,monkeypatch):
         monkeypatch.setattr(module,'now_ts',lambda:stamp+601)
         assert not c.get('/v1/queue/state',headers=auth(a)).json()['queued']
         assert c.get('/v1/sessions',headers=auth(a)).json()=={'sessions':[]}
+
+def test_cancel_session_keeps_assigned_match(tmp_path,monkeypatch):
+    stamp=module.now_ts()
+    monkeypatch.setattr(module,'now_ts',lambda:stamp)
+    with TestClient(create_app(str(tmp_path/'active.db'),admin_key=ADMIN)) as c:
+        roles=['BARON','JUNGLE','MID','DRAGON','SUPPORT']
+        users=[register(c,1600+i,role=roles[i%5],secondary=roles[(i+1)%5]) for i in range(10)]
+        data={'title':'Training','region':'EUROPE','starts_at':stamp+1,'ends_at':stamp+601,'capacity':10}
+        sid=c.post('/v1/admin/sessions',headers=admin(),json=data).json()['id']
+        for u in users:
+            approve(c,u)
+            assert c.post(f'/v1/sessions/{sid}/signup',headers=auth(u)).status_code==200
+        monkeypatch.setattr(module,'now_ts',lambda:stamp+1)
+        for u in users:
+            assert c.post('/v1/queue/join?session_id='+sid,headers=auth(u)).status_code==200
+        mid=c.get('/v1/queue/state',headers=auth(users[0])).json()['match']['id']
+        assert c.post(f'/v1/admin/sessions/{sid}/cancel',headers=admin()).status_code==200
+        for u in users:
+            assert c.post(f'/v1/matches/{mid}/ready',headers=auth(u)).status_code==200
+        assert c.get('/v1/queue/state',headers=auth(users[0])).json()['match']['status']=='ACTIVE'

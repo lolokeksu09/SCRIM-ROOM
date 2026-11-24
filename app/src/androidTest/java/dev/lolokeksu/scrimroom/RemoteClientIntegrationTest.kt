@@ -20,6 +20,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayInputStream
 import java.net.URL
+import org.json.JSONObject
 import java.security.KeyStore
 import java.security.cert.CertificateFactory
 import javax.net.ssl.HttpsURLConnection
@@ -128,6 +129,43 @@ class RemoteClientIntegrationTest {
                 assertEquals("BLUE", results[0].winner)
                 assertNull(api.state(token).toOnlineQueueState().match)
             }
+            // A real scheduled session, distinct from the ordinary queue.
+            val starts = System.currentTimeMillis() / 1000 + 5
+            val c = URL("$base/v1/admin/sessions").openConnection() as HttpsURLConnection
+            val sessionId: String
+            try {
+                c.requestMethod = "POST"
+                c.connectTimeout = 12000
+                c.readTimeout = 15000
+                c.instanceFollowRedirects = false
+                c.doOutput = true
+                c.setRequestProperty("X-Admin-Key", "test-only-ephemeral-scrim-admin-key-for-local-ci")
+                c.setRequestProperty("Content-Type", "application/json")
+                val data = JSONObject().put("title","CI practice").put("region","EUROPE")
+                    .put("starts_at",starts).put("ends_at",starts+600).put("capacity",10)
+                c.outputStream.use { it.write(data.toString().toByteArray(Charsets.UTF_8)) }
+                assertEquals(201,c.responseCode)
+                sessionId = JSONObject(c.inputStream.bufferedReader().use { it.readText() }).getString("id")
+            } finally { c.disconnect() }
+            tokens.forEach { token -> api.signup(token,sessionId) }
+            val session = api.sessions(tokens.first()).single { it.id == sessionId }
+            assertTrue(session.enrolled)
+            assertEquals(10,session.registered)
+            api.withdraw(tokens.last(),sessionId)
+            assertFalse(api.sessions(tokens.last()).single { it.id == sessionId }.enrolled)
+            api.signup(tokens.last(),sessionId)
+            val endWait=System.currentTimeMillis()+15000
+            while(api.sessions(tokens.first()).single { it.id==sessionId }.status!="OPEN") {
+                check(System.currentTimeMillis()<endWait)
+                Thread.sleep(250)
+            }
+            tokens.take(9).forEach { api.join(it,sessionId) }
+            api.join(tokens.last())
+            assertNull(api.state(tokens.first()).toOnlineQueueState().match)
+            assertEquals(sessionId, api.state(tokens.first()).toOnlineQueueState().sessionId)
+            api.leave(tokens.last())
+            api.join(tokens.last(),sessionId)
+            assertNotNull(api.state(tokens.first()).toOnlineQueueState().match)
         } finally {
             HttpsURLConnection.setDefaultSSLSocketFactory(original)
             images.forEach { resolver.delete(it, null, null) }

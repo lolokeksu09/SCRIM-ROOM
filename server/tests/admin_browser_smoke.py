@@ -4,6 +4,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.request import urlopen
 
@@ -73,6 +74,16 @@ with tempfile.TemporaryDirectory() as tmp:
                 expect(page.locator("#detail")).to_contain_text("Отклонён")
                 page.get_by_role("button", name="Матчи", exact=True).click()
                 expect(page.locator("#matchList")).to_contain_text("Назначенных матчей нет")
+                page.get_by_role("button", name="Сессии", exact=True).click()
+                page.locator("#sessionTitle").fill("Evening test")
+                page.locator("#sessionStart").fill((datetime.now()+timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M"))
+                page.get_by_role("button", name="Создать сессию", exact=True).click()
+                expect(page.locator("#sessionList")).to_contain_text("Evening test")
+                expect(page.locator("#sessionList")).to_contain_text("Записано 0/20")
+                page.screenshot(path=str(out / "03-sessions-mobile.png"), full_page=True)
+                assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+                page.get_by_role("button", name="Отменить сессию", exact=True).click()
+                expect(page.locator("#sessionList")).to_contain_text("Отменена")
                 page.get_by_role("button", name="Выйти", exact=True).click()
                 expect(page.locator("#workspace")).to_be_hidden()
                 expect(page.locator("#login")).to_be_visible()
