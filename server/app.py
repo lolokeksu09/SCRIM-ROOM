@@ -80,6 +80,21 @@ class ResolutionIn(BaseModel):
     winner: Literal['BLUE', 'RED', 'VOID']
 
 
+class SessionIn(BaseModel):
+    title: str = Field(min_length=3,max_length=80)
+    region: Literal['EUROPE','ASIA','AMERICAS']
+    starts_at: int
+    ends_at: int
+    capacity: int = Field(ge=10,le=100)
+
+    @model_validator(mode='after')
+    def validate_window(self):
+        self.title=self.title.strip()
+        if len(self.title)<3 or self.starts_at<now_ts() or not 600<=self.ends_at-self.starts_at<=7200 or self.starts_at>now_ts()+30*86400:
+            raise ValueError('Сессия: будущая дата в пределах 30 дней, длительность 10–120 минут')
+        return self
+
+
 class Database:
     def __init__(self, path):
         self.path = path
@@ -146,6 +161,22 @@ class Database:
                   scope TEXT NOT NULL, identity TEXT NOT NULL, window_start INTEGER NOT NULL,
                   count INTEGER NOT NULL, PRIMARY KEY(scope,identity,window_start)
                 );
+                CREATE TABLE IF NOT EXISTS sessions(
+                  id TEXT PRIMARY KEY,title TEXT NOT NULL,region TEXT NOT NULL,
+                  starts_at INTEGER NOT NULL,ends_at INTEGER NOT NULL,capacity INTEGER NOT NULL,cancelled INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS session_signups(
+                  session_id TEXT NOT NULL REFERENCES sessions(id),account_id TEXT NOT NULL REFERENCES accounts(id),
+                  joined_at INTEGER NOT NULL,PRIMARY KEY(session_id,account_id)
+                );
+                CREATE TABLE IF NOT EXISTS queue_sessions(
+                  account_id TEXT PRIMARY KEY REFERENCES queue(account_id) ON DELETE CASCADE,
+                  session_id TEXT NOT NULL REFERENCES sessions(id)
+                );
+                CREATE TABLE IF NOT EXISTS match_sessions(
+                  match_id TEXT PRIMARY KEY REFERENCES matches(id),session_id TEXT NOT NULL REFERENCES sessions(id)
+                );
+                CREATE INDEX IF NOT EXISTS session_region_start ON sessions(region,starts_at);
                 CREATE TABLE IF NOT EXISTS match_reports(
                   match_id TEXT NOT NULL REFERENCES matches(id), side TEXT NOT NULL,
                   winner TEXT NOT NULL, reported_at INTEGER NOT NULL,
@@ -227,6 +258,7 @@ def _match_info(db, match_id, viewer_id=None, moderator=False):
     own_report = next((r['winner'] for r in reports if captain and r['side']==own['side']), None)
     return {
         'id': match['id'], 'status': match['status'], 'region': match['region'],
+        'session_id': (lambda r:r['session_id'] if r else None)(db.execute('SELECT session_id FROM match_sessions WHERE match_id=?',(match_id,)).fetchone()),
         'is_captain': captain, 'own_report': own_report, 'report_count': len(reports),
         'reports': {r['side']:r['winner'] for r in reports} if moderator else {},
         'result': dict(result) if result else None,
@@ -265,6 +297,45 @@ def _finish_result(db, mid, winner, source):
     db.execute("UPDATE matches SET status='CLOSED' WHERE id=?",(mid,))
 
 
+def session_status(row):
+    if row['cancelled']: return 'CANCELLED'
+    if now_ts()>=row['ends_at']: return 'ENDED'
+    if now_ts()>=row['starts_at']: return 'OPEN'
+    return 'UPCOMING'
+
+
+def session_info(db,row,viewer=None):
+    sid=row['id']
+    counts=db.execute("""SELECT a.primary_role,count(*) AS n FROM session_signups s
+        JOIN accounts a ON a.id=s.account_id WHERE s.session_id=? AND a.status='APPROVED' AND a.region=?
+        GROUP BY a.primary_role""",(sid,row['region'])).fetchall()
+    roles={r['primary_role']:r['n'] for r in counts}
+    return dict(row,status=session_status(row),registered=sum(roles.values()),roles=roles,
+        enrolled=bool(viewer and db.execute('SELECT 1 FROM session_signups WHERE session_id=? AND account_id=?',(sid,viewer)).fetchone()),
+        waiting=db.execute('SELECT count(*) FROM queue_sessions WHERE session_id=?',(sid,)).fetchone()[0])
+
+
+def clean_session_queues(db):
+    db.execute("""DELETE FROM queue WHERE account_id IN (
+       SELECT q.account_id FROM queue_sessions q JOIN sessions s ON s.id=q.session_id
+       WHERE s.cancelled=1 OR s.ends_at<=?)""",(now_ts(),))
+
+
+def requeue_match_player(db,mid,player):
+    scope=db.execute('SELECT session_id FROM match_sessions WHERE match_id=?',(mid,)).fetchone()
+    if scope:
+        sid=scope['session_id']
+        event=db.execute('SELECT * FROM sessions WHERE id=?',(sid,)).fetchone()
+        if session_status(event)!='OPEN' or not db.execute('SELECT 1 FROM session_signups WHERE session_id=? AND account_id=?',(sid,player['id'])).fetchone():
+            return
+    else:
+        sid=None
+    if discipline(db,player['id'])['blocked_until']: return
+    inserted=db.execute('INSERT OR IGNORE INTO queue(account_id,region,joined_at) VALUES(?,?,?)',(player['id'],player['region'],now_ts())).rowcount
+    if inserted and sid:
+        db.execute('INSERT INTO queue_sessions VALUES(?,?)',(player['id'],sid))
+
+
 def _expire_ready_checks(db):
     expired = db.execute("SELECT id FROM matches WHERE status='READY_CHECK' AND deadline<?", (now_ts(),)).fetchall()
     for item in expired:
@@ -278,18 +349,18 @@ def _expire_ready_checks(db):
           WHERE mp.match_id=? AND mp.ready=1 AND a.status='APPROVED'
         ''', (mid,)).fetchall()
         for player in players:
-            db.execute('INSERT OR IGNORE INTO queue(account_id,region,joined_at) VALUES(?,?,?)', (player['id'],player['region'],now_ts()))
+            requeue_match_player(db,mid,player)
 
 
-def _try_match(db, region):
+def _try_match(db, region, session_id=None):
     # Choose earliest feasible ten within the first twelve to reduce role starvation.
     waiters = db.execute('''
       SELECT a.id,a.riot_id,a.region,a.primary_role AS "primary",
       a.secondary_role AS secondary,a.rating
-      FROM queue q JOIN accounts a ON a.id=q.account_id
-      WHERE q.region=? AND a.status='APPROVED'
+      FROM queue q JOIN accounts a ON a.id=q.account_id LEFT JOIN queue_sessions qs ON qs.account_id=q.account_id
+      WHERE q.region=? AND a.status='APPROVED' AND qs.session_id IS ?
       ORDER BY q.joined_at,q.rowid LIMIT 12
-    ''', (region,)).fetchall()
+    ''', (region,session_id)).fetchall()
     if len(waiters) < 10:
         return
     arranged = None
@@ -303,6 +374,7 @@ def _try_match(db, region):
     mid = uuid.uuid4().hex
     deadline = now_ts()+180
     db.execute('INSERT INTO matches VALUES(?,?,?,?,?)', (mid,region,'READY_CHECK',now_ts(),deadline))
+    if session_id: db.execute('INSERT INTO match_sessions VALUES(?,?)',(mid,session_id))
     for side, team in [('BLUE',blue),('RED',red)]:
         for p, role in team:
             db.execute('INSERT INTO match_players(match_id,account_id,side,role) VALUES(?,?,?,?)', (mid,p['id'],side,role))
@@ -331,7 +403,7 @@ def create_app(db_path: str, admin_key: str | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.4.0', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.5.0', docs_url=None, redoc_url=None)
 
     def limit(scope, identity, maximum, period):
         stamp=now_ts()
@@ -418,6 +490,7 @@ def create_app(db_path: str, admin_key: str | None = None):
             rating = user['rating'] if played else RANK_SEEDS[high_rank]
             db.execute('DELETE FROM queue WHERE account_id=?',(user['id'],))
             db.execute('DELETE FROM evidence WHERE account_id=?',(user['id'],))
+            db.execute('DELETE FROM session_signups WHERE account_id=?',(user['id'],))
             try:
                 db.execute('''UPDATE accounts SET riot_id=?,region=?,current_rank=?,previous_rank=?,
                     primary_role=?,secondary_role=?,rating=?,status='PENDING_REVIEW' WHERE id=?''',
@@ -472,25 +545,94 @@ def create_app(db_path: str, admin_key: str | None = None):
         limit('admin_ocr','moderator',60,3600)
         return read_ocr(account_id,slot)
 
+    @app.get('/v1/sessions')
+    def sessions(token=Depends(token_header)):
+        with store.transaction(write=True) as db:
+            user=get_user(db,token)
+            clean_session_queues(db)
+            rows=db.execute('SELECT * FROM sessions WHERE region=? AND ends_at>? AND cancelled=0 ORDER BY starts_at LIMIT 50',(user['region'],now_ts())).fetchall()
+            return {'sessions':[session_info(db,r,user['id']) for r in rows]}
+
+    @app.post('/v1/sessions/{sid}/signup')
+    def session_signup(sid:str,token=Depends(token_header)):
+        with store.transaction(write=True) as db:
+            user=get_user(db,token)
+            event=db.execute('SELECT * FROM sessions WHERE id=? AND region=?',(sid,user['region'])).fetchone()
+            if not event: raise HTTPException(404,'Сессия не найдена')
+            if user['status']!='APPROVED': raise HTTPException(403,'Нужен допуск')
+            if session_status(event) not in ('UPCOMING','OPEN'): raise HTTPException(409,'Запись закрыта')
+            current=session_info(db,event,user['id'])
+            if current['enrolled']: return current
+            overlap=db.execute("""SELECT 1 FROM session_signups ss JOIN sessions s ON s.id=ss.session_id
+                WHERE ss.account_id=? AND s.cancelled=0 AND s.starts_at<? AND s.ends_at>?""",(user['id'],event['ends_at'],event['starts_at'])).fetchone()
+            if overlap: raise HTTPException(409,'Уже есть запись на пересекающееся время')
+            if current['registered']>=event['capacity']: raise HTTPException(409,'Все места заняты')
+            db.execute('INSERT INTO session_signups VALUES(?,?,?)',(sid,user['id'],now_ts()))
+            return session_info(db,event,user['id'])
+
+    @app.post('/v1/sessions/{sid}/withdraw')
+    def session_withdraw(sid:str,token=Depends(token_header)):
+        with store.transaction(write=True) as db:
+            user=get_user(db,token)
+            event=db.execute('SELECT * FROM sessions WHERE id=? AND region=?',(sid,user['region'])).fetchone()
+            if not event: raise HTTPException(404,'Сессия не найдена')
+            mid=_active_match_id(db,user['id'])
+            if mid and db.execute('SELECT 1 FROM match_sessions WHERE match_id=? AND session_id=?',(mid,sid)).fetchone():
+                raise HTTPException(409,'Сначала заверши назначенный матч')
+            if db.execute('SELECT 1 FROM queue_sessions WHERE account_id=? AND session_id=?',(user['id'],sid)).fetchone():
+                db.execute('DELETE FROM queue WHERE account_id=?',(user['id'],))
+            db.execute('DELETE FROM session_signups WHERE session_id=? AND account_id=?',(sid,user['id']))
+            return session_info(db,event,user['id'])
+
+    @app.get('/v1/admin/sessions',dependencies=[Depends(admin_auth)])
+    def admin_sessions():
+        with store.transaction(write=True) as db:
+            clean_session_queues(db)
+            rows=db.execute('SELECT * FROM sessions ORDER BY starts_at DESC LIMIT 100').fetchall()
+            return {'sessions':[session_info(db,r) for r in rows]}
+
+    @app.post('/v1/admin/sessions',status_code=201,dependencies=[Depends(admin_auth)])
+    def admin_create_session(payload:SessionIn):
+        with store.transaction(write=True) as db:
+            if db.execute('SELECT 1 FROM sessions WHERE region=? AND cancelled=0 AND starts_at<? AND ends_at>?',(payload.region,payload.ends_at,payload.starts_at)).fetchone():
+                raise HTTPException(409,'В регионе уже есть сессия на это время')
+            sid=uuid.uuid4().hex
+            db.execute('INSERT INTO sessions VALUES(?,?,?,?,?,?,0)',(sid,payload.title,payload.region,payload.starts_at,payload.ends_at,payload.capacity))
+            return session_info(db,db.execute('SELECT * FROM sessions WHERE id=?',(sid,)).fetchone())
+
+    @app.post('/v1/admin/sessions/{sid}/cancel',dependencies=[Depends(admin_auth)])
+    def admin_cancel_session(sid:str):
+        with store.transaction(write=True) as db:
+            event=db.execute('SELECT * FROM sessions WHERE id=?',(sid,)).fetchone()
+            if not event: raise HTTPException(404,'Сессия не найдена')
+            if session_status(event)=='ENDED': raise HTTPException(409,'Сессия уже завершилась')
+            db.execute('UPDATE sessions SET cancelled=1 WHERE id=?',(sid,))
+            clean_session_queues(db)
+            return {'status':'CANCELLED'}
+
     @app.get('/v1/queue/state')
     def queue_state(token=Depends(token_header)):
         with store.transaction(write=True) as db:
             user=get_user(db,token)
             _expire_ready_checks(db)
+            clean_session_queues(db)
             match_id=_active_match_id(db,user['id'])
             queued=db.execute('SELECT 1 FROM queue WHERE account_id=?',(user['id'],)).fetchone() is not None
-            count=db.execute('SELECT count(*) FROM queue WHERE region=?',(user['region'],)).fetchone()[0]
+            scope=db.execute('SELECT session_id FROM queue_sessions WHERE account_id=?',(user['id'],)).fetchone()
+            sid=scope['session_id'] if scope else None
+            count=db.execute('SELECT count(*) FROM queue q LEFT JOIN queue_sessions qs ON q.account_id=qs.account_id WHERE q.region=? AND qs.session_id IS ?',(user['region'],sid)).fetchone()[0]
             return {'account_status':user['status'],'queued':queued,'waiting_in_region':count,
-                    'discipline':discipline(db,user['id']), 'match':_match_info(db,match_id,viewer_id=user['id']) if match_id else None}
+                    'session_id':sid, 'discipline':discipline(db,user['id']), 'match':_match_info(db,match_id,viewer_id=user['id']) if match_id else None}
 
     @app.post('/v1/queue/join')
-    def join_queue(token=Depends(token_header)):
+    def join_queue(session_id:str|None=None,token=Depends(token_header)):
         with store.transaction() as db:
             ident=get_user(db,token)['id']
         limit('queue_join',ident,30,60)
         # Commit expiration before enforcing cooldown; an HTTP error must not roll it back.
         with store.transaction(write=True) as db:
             _expire_ready_checks(db)
+            clean_session_queues(db)
         with store.transaction(write=True) as db:
             user=get_user(db,token)
             blocked=discipline(db,user['id'])['blocked_until']
@@ -500,9 +642,18 @@ def create_app(db_path: str, admin_key: str | None = None):
                 raise HTTPException(403, 'Требуется одобрение заявки модератором')
             if _active_match_id(db,user['id']):
                 raise HTTPException(409, 'Игрок уже назначен на матч')
-            db.execute('INSERT OR IGNORE INTO queue(account_id,region,joined_at) VALUES(?,?,?)',
-                       (user['id'],user['region'],now_ts()))
-            _try_match(db,user['region'])
+            existing=db.execute('SELECT qs.session_id FROM queue q LEFT JOIN queue_sessions qs ON q.account_id=qs.account_id WHERE q.account_id=?',(user['id'],)).fetchone()
+            if existing and existing['session_id']!=session_id:
+                raise HTTPException(409,'Сначала покинь текущую очередь')
+            if session_id is not None:
+                event=db.execute('SELECT * FROM sessions WHERE id=? AND region=?',(session_id,user['region'])).fetchone()
+                if not event: raise HTTPException(404,'Сессия не найдена')
+                if session_status(event)!='OPEN': raise HTTPException(409,'Игровое окно не открыто')
+                if not db.execute('SELECT 1 FROM session_signups WHERE session_id=? AND account_id=?',(session_id,user['id'])).fetchone():
+                    raise HTTPException(403,'Сначала запишись на сессию')
+            db.execute('INSERT OR IGNORE INTO queue(account_id,region,joined_at) VALUES(?,?,?)',(user['id'],user['region'],now_ts()))
+            if session_id: db.execute('INSERT OR IGNORE INTO queue_sessions VALUES(?,?)',(user['id'],session_id))
+            _try_match(db,user['region'],session_id)
             match_id=_active_match_id(db,user['id'])
             return {'queued':match_id is None,'match':_match_info(db,match_id,viewer_id=user['id']) if match_id else None}
 
@@ -549,8 +700,7 @@ def create_app(db_path: str, admin_key: str | None = None):
                 JOIN accounts a ON a.id=mp.account_id
                 WHERE mp.match_id=? AND a.id!=? AND a.status='APPROVED' ''',(match_id,user['id'])).fetchall()
             for other in others:
-                db.execute('INSERT OR IGNORE INTO queue(account_id,region,joined_at) VALUES(?,?,?)',
-                           (other['id'],other['region'],now_ts()))
+                requeue_match_player(db,match_id,other)
             return {'status':'CANCELLED'}
 
     @app.post('/v1/matches/{match_id}/result')
@@ -645,6 +795,7 @@ def create_app(db_path: str, admin_key: str | None = None):
             if not changed:
                 raise HTTPException(404,'Участник не найден')
             db.execute('DELETE FROM queue WHERE account_id=?',(account_id,))
+            db.execute('DELETE FROM session_signups WHERE account_id=?',(account_id,))
             return {'status':'REJECTED'}
 
     @app.post('/v1/admin/matches/{match_id}/close', dependencies=[Depends(admin_auth)])
