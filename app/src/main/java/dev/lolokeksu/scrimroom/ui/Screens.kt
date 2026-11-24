@@ -825,7 +825,7 @@ fun CompetitiveScreen(state: ScrimUiState,vm: ScrimViewModel) {
             PanelCard { Text("Соревнования доступны после допуска игрока.",color=Muted) }
         } else {
             SecondaryAction("Обновить соревнования",enabled=!state.onlineBusy){vm.loadClub()}
-            ChoiceRow("Раздел",listOf("Команда","Встречи","Кубки"),section,{it}){section=it}
+            ChoiceRow("Раздел",listOf("Команда","Встречи","Кубки","Сезоны"),section,{it}){section=it}
             val data=state.club
             if(data==null) Text("Данные ещё не загружены",color=Muted)
             else {
@@ -902,6 +902,18 @@ fun CompetitiveScreen(state: ScrimUiState,vm: ScrimViewModel) {
                                 if(mine.id==f.b) PrimaryAction("Принять вызов",enabled=!state.onlineBusy){vm.clubChallengeAction(f.id,true)}
                                 SecondaryAction("Отклонить / отменить вызов",enabled=!state.onlineBusy){vm.clubChallengeAction(f.id,false)}
                             }
+                        }
+                    }
+                }
+                if(section=="Сезоны"){
+                    if(data.seasons.isEmpty()) Text("Сезоны ещё не созданы",color=Muted)
+                    data.seasons.forEach { season ->
+                        PanelCard {
+                            Text(season.name,fontSize=20.sp,fontWeight=FontWeight.Bold)
+                            Text(formatter.format(Date(season.starts*1000))+" — "+formatter.format(Date(season.ends*1000)),color=Muted,fontSize=12.sp)
+                            val table=data.standings[season.id].orEmpty()
+                            if(table.isEmpty()) Text("Нет подтверждённых встреч",color=Muted)
+                            table.forEach { row -> Text("${row.name} · ${row.wins} побед / ${row.losses} поражений",fontSize=13.sp) }
                         }
                     }
                 }

@@ -116,7 +116,7 @@ function renderCompetitive(){
  $('cupSeason').replaceChildren(option('','Выбрать сезон'),...competitive.seasons.filter(s=>s.ends_at>Date.now()/1000).map(s=>option(s.id,s.name+' · '+s.region)));
  if([...$('cupSeason').options].some(o=>o.value===old))$('cupSeason').value=old;
  renderCupTeams();
- $('seasonList').replaceChildren(...competitive.seasons.map(s=>node('p',s.name+' · '+s.region+' · '+new Date(s.starts_at*1000).toLocaleDateString()+' — '+new Date(s.ends_at*1000).toLocaleDateString())));
+ $('seasonList').replaceChildren(...competitive.seasons.map(s=>{const a=node('article',undefined,'match');a.append(node('h2',s.name+' · '+s.region),node('p',new Date(s.starts_at*1000).toLocaleDateString()+' — '+new Date(s.ends_at*1000).toLocaleDateString()));const rows=competitive.standings?.[s.id]||[];for(const row of rows)a.append(node('p',row.name+' · '+row.wins+' побед / '+row.losses+' поражений'));if(!rows.length)a.append(node('p','Нет подтверждённых встреч'));return a}));
  $('clubTeams').replaceChildren(...competitive.teams.map(t=>{const a=node('article',undefined,'match');a.append(node('h2',t.name+' · '+t.region),node('p',t.members.length+'/5 · Победы '+t.wins+'/'+t.played),node('p',t.members.map(m=>m.riot_id+(m.id===t.captain?' (К)':'')).join(' · ')));return a}));
  $('cupList').replaceChildren(...competitive.cups.map(c=>{
   const a=node('article',undefined,'match');a.append(node('h2',c.name),node('p',c.status));if(c.status==='RUNNING'){const b=node('button','Отменить кубок','danger');b.onclick=()=>mutate('/competitive/cups/'+c.id+'/cancel',null,'Отменить турнир?');a.append(b)}return a

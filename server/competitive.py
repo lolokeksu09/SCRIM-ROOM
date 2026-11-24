@@ -137,7 +137,14 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
         my=own(db,u) if u else None
         invites=[] if not u else [dict(r) for r in db.execute("""SELECT i.id,t.name,t.id AS team_id FROM club_invites i
            JOIN club_teams t ON t.id=i.team_id WHERE i.recipient=? AND t.archived=0 AND t.region=?""",(u['id'],region))]
-        return {'seasons':[dict(s) for s in ss],'teams':[card(db,t) if u is None or (my and my['id']==t['id']) else
+        standings={}
+        for season_row in ss:
+            rows=db.execute("""SELECT t.id,t.name,count(*) AS played,sum(f.winner_id=t.id) AS wins
+                FROM club_fixtures f JOIN club_teams t ON t.id=f.team_a OR t.id=f.team_b
+                WHERE f.season_id=? AND f.status='FINISHED' GROUP BY t.id,t.name
+                ORDER BY wins DESC,played ASC,t.name COLLATE NOCASE,t.id""",(season_row['id'],)).fetchall()
+            standings[season_row['id']]=[dict(row,losses=row['played']-row['wins']) for row in rows]
+        return {'standings':standings,'seasons':[dict(s) for s in ss],'teams':[card(db,t) if u is None or (my and my['id']==t['id']) else
            {k:v for k,v in card(db,t).items() if k!='members' and k!='captain'} for t in teams],
            'my_team':card(db,my) if my else None,'is_captain':bool(my and my['captain']==u['id']),
            'invites':invites,'fixtures':[fixture_view(db,f,u is None or bool(my and my['id'] in (f['team_a'],f['team_b']))) for f in fs],

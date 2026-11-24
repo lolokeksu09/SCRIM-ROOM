@@ -157,7 +157,8 @@ class RemoteClient(baseInput: String) {
             rows("invites").map { ClubInvite(it.getString("id"),it.getString("name")) },
             rows("seasons").map { ClubSeason(it.getString("id"),it.getString("name"),it.getLong("starts_at"),it.getLong("ends_at")) },
             rows("fixtures").map { ClubFixture(it.getString("id"),it.getString("team_a"),it.getString("team_b"),it.getString("team_a_name"),it.getString("team_b_name"),it.getString("stage"),it.getString("status"),it.getLong("starts_at"),it.optString("winner_id").takeUnless { s -> s=="null" || s.isBlank() },it.optString("cup_id").takeUnless { s -> s=="null" || s.isBlank() }) },
-            rows("cups").map { ClubCup(it.getString("id"),it.getString("name"),it.getString("status"),it.optString("winner_id").takeUnless { s -> s=="null" || s.isBlank() }) })
+            rows("cups").map { ClubCup(it.getString("id"),it.getString("name"),it.getString("status"),it.optString("winner_id").takeUnless { s -> s=="null" || s.isBlank() }) },
+            rows("seasons").associate { season -> val id=season.getString("id"); val a=obj.optJSONObject("standings")?.optJSONArray(id); id to (if(a==null) emptyList() else (0 until a.length()).map { i -> a.getJSONObject(i).let { ClubStanding(it.getString("name"),it.getInt("played"),it.getInt("wins"),it.getInt("losses")) } }) })
     }
     fun createClubTeam(token:String,name:String)=jsonRequest("POST","/v1/competitive/teams",token,JSONObject().put("name",name))
     fun inviteClubMember(token:String,riotId:String)=jsonRequest("POST","/v1/competitive/team/invite",token,JSONObject().put("riot_id",riotId))
@@ -295,4 +296,5 @@ data class ClubInvite(val id:String,val name:String)
 data class ClubSeason(val id:String,val name:String,val starts:Long,val ends:Long)
 data class ClubFixture(val id:String,val a:String,val b:String,val aName:String,val bName:String,val stage:String,val status:String,val starts:Long,val winner:String?,val cupId:String?)
 data class ClubCup(val id:String,val name:String,val status:String,val winner:String?)
-data class ClubData(val mine:ClubTeam?,val captain:Boolean,val teams:List<ClubTeam>,val invites:List<ClubInvite>,val seasons:List<ClubSeason>,val fixtures:List<ClubFixture>,val cups:List<ClubCup>)
+data class ClubData(val mine:ClubTeam?,val captain:Boolean,val teams:List<ClubTeam>,val invites:List<ClubInvite>,val seasons:List<ClubSeason>,val fixtures:List<ClubFixture>,val cups:List<ClubCup>,val standings:Map<String,List<ClubStanding>>)
+data class ClubStanding(val name:String,val played:Int,val wins:Int,val losses:Int)

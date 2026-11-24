@@ -60,3 +60,6 @@ def test_team_challenge_and_cup(tmp_path,monkeypatch):
         assert all('members' not in t for t in other['teams'])
         assert all('roster_a' not in f for f in other['fixtures'])
         assert next(t for t in other['teams'] if t['id']==teams[0])['wins']==3
+        assert other['standings'][sid][0]=={'id':teams[0],'name':'Team 0','played':3,'wins':3,'losses':0}
+        assert sum(row['wins'] for row in other['standings'][sid])==4
+        assert sum(row['losses'] for row in other['standings'][sid])==4
