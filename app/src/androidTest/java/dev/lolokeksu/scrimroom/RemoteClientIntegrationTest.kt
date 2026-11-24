@@ -1,0 +1,116 @@
+package dev.lolokeksu.scrimroom
+
+import android.content.ContentValues
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.net.Uri
+import android.provider.MediaStore
+import android.util.Base64
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import dev.lolokeksu.scrimroom.data.RemoteClient
+import dev.lolokeksu.scrimroom.data.RemoteException
+import dev.lolokeksu.scrimroom.data.toOnlineQueueState
+import dev.lolokeksu.scrimroom.model.PlayerProfile
+import dev.lolokeksu.scrimroom.model.Rank
+import dev.lolokeksu.scrimroom.model.Role
+import org.junit.Assert.*
+import org.junit.Assume.assumeTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import java.io.ByteArrayInputStream
+import java.net.URL
+import java.security.KeyStore
+import java.security.cert.CertificateFactory
+import javax.net.ssl.HttpsURLConnection
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
+
+/** Real Android HTTP stack against an isolated FastAPI instance. No production TLS bypass. */
+@RunWith(AndroidJUnit4::class)
+class RemoteClientIntegrationTest {
+    @Test fun registrationEvidenceModerationAndTenPlayerReadyCheck() {
+        val args = InstrumentationRegistry.getArguments()
+        val encoded = args.getString("scrimTestCert").orEmpty()
+        assumeTrue("Requires isolated HTTPS server supplied by the emulator CI", encoded.isNotEmpty())
+        val resolver = InstrumentationRegistry.getInstrumentation().targetContext.contentResolver
+        val certificate = CertificateFactory.getInstance("X.509").generateCertificate(
+            ByteArrayInputStream(Base64.decode(encoded, Base64.DEFAULT)))
+        val store = KeyStore.getInstance(KeyStore.getDefaultType()).apply {
+            load(null, null)
+            setCertificateEntry("ci", certificate)
+        }
+        val trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(store) }
+        val ssl = SSLContext.getInstance("TLS").apply { init(null, trust.trustManagers, null) }
+        val original = HttpsURLConnection.getDefaultSSLSocketFactory()
+        val images = mutableListOf<Uri>()
+        try {
+            // This override exists only in androidTest and is restored in finally.
+            HttpsURLConnection.setDefaultSSLSocketFactory(ssl.socketFactory)
+            val base = "https://10.0.2.2:8443"
+            val api = RemoteClient(base)
+            val stamp = System.currentTimeMillis().toString()
+            repeat(2) { i ->
+                val bitmap = Bitmap.createBitmap(24, 24, Bitmap.Config.ARGB_8888)
+                bitmap.eraseColor(if (i == 0) Color.BLUE else Color.RED)
+                val uri = checkNotNull(resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                    ContentValues().apply {
+                        put(MediaStore.Images.Media.DISPLAY_NAME, "scrim-ci-$stamp-$i.png")
+                        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/ScrimRoomNetworkTests")
+                    }))
+                images.add(uri)
+                checkNotNull(resolver.openOutputStream(uri)).use { check(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                bitmap.recycle()
+            }
+            fun approve(accountId: String) {
+                val c = URL("$base/v1/admin/accounts/$accountId/approve").openConnection() as HttpsURLConnection
+                try {
+                    c.requestMethod = "POST"
+                    c.connectTimeout = 12000
+                    c.readTimeout = 15000
+                    c.instanceFollowRedirects = false
+                    c.setRequestProperty("X-Admin-Key", "test-only-ephemeral-scrim-admin-key-for-local-ci")
+                    assertEquals(200, c.responseCode)
+                    c.inputStream.use { it.readBytes() }
+                } finally { c.disconnect() }
+            }
+            val roles = Role.entries
+            val tokens = (0 until 10).map { i ->
+                val reply = api.register(PlayerProfile(
+                    riotId = "CI${stamp.takeLast(8)}$i#EUW", region = "EUROPE",
+                    currentRank = Rank.GRANDMASTER, previousRank = Rank.MASTER,
+                    primary = roles[i % 5], secondary = roles[(i + 1) % 5]))
+                val token = reply.getString("token")
+                val account = reply.getJSONObject("account")
+                assertEquals("PENDING_REVIEW", account.getString("status"))
+                val denied = runCatching { api.join(token) }.exceptionOrNull() as? RemoteException
+                assertEquals(403, denied?.statusCode)
+                images.forEach { api.uploadEvidence(token, resolver, it) }
+                assertEquals(2, api.account(token).getInt("evidence_count"))
+                approve(account.getString("id"))
+                assertEquals("APPROVED", api.account(token).getString("status"))
+                token
+            }
+            api.join(tokens.first())
+            assertTrue(api.state(tokens.first()).toOnlineQueueState().queued)
+            api.leave(tokens.first())
+            assertFalse(api.state(tokens.first()).toOnlineQueueState().queued)
+            tokens.forEach { api.join(it) }
+            val found = checkNotNull(api.state(tokens.first()).toOnlineQueueState().match)
+            assertEquals("READY_CHECK", found.status)
+            assertEquals(5, found.blue.size)
+            assertEquals(5, found.red.size)
+            assertEquals(roles.map { it.name }.toSet(), found.blue.map { it.role }.toSet())
+            assertEquals(roles.map { it.name }.toSet(), found.red.map { it.role }.toSet())
+            assertEquals(10, (found.blue + found.red).map { it.riotId }.toSet().size)
+            tokens.forEach { api.ready(it, found.id) }
+            val active = checkNotNull(api.state(tokens.first()).toOnlineQueueState().match)
+            assertEquals("ACTIVE", active.status)
+            assertEquals(10, active.readyCount)
+        } finally {
+            HttpsURLConnection.setDefaultSSLSocketFactory(original)
+            images.forEach { resolver.delete(it, null, null) }
+        }
+    }
+}

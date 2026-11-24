@@ -42,6 +42,7 @@ class ScrimRoomUiTest {
 
     @Test fun navigationAndOfflineQueue() {
         compose.onNodeWithText("SCRIM ROOM").assertExists()
+        compose.onNodeWithText("PILOT ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
         compose.onNodeWithText("Сильные игроки.\nЧестный подбор.").assertExists()
         shot("01-home")
         compose.onNodeWithText("Очередь").performClick()
@@ -67,8 +68,9 @@ class ScrimRoomUiTest {
     @Test fun demoResultAndPersistenceAfterActivityRecreation() {
         compose.onNodeWithText("Очередь").performClick()
         compose.onNodeWithText("Сформировать демо-матч").performScrollTo().performClick()
-        compose.onNodeWithText("Демо · синие").assertExists()
+        compose.onNodeWithText("Демо · синие").assertIsDisplayed()
         compose.onNodeWithText("Демо · красные").assertExists()
+        compose.onNodeWithText("Демо-матч сформирован").assertExists()
         shot("06-demo-teams")
         compose.onNodeWithText("Победили синие").performScrollTo().performClick()
         compose.onNodeWithText("Матчи").performClick()

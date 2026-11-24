@@ -30,6 +30,7 @@ import org.json.JSONObject
 data class ScrimUiState(
     val profile: PlayerProfile = PlayerProfile(),
     val demoMatch: MatchDraft? = null,
+    val demoScrollRequest: Long = 0,
     val demoHistory: List<DemoResult> = emptyList(),
     val serverUrl: String = "",
     val hasOnlineAccount: Boolean = false,
@@ -113,9 +114,10 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
                 store.writeServerToken(token)
                 store.writeSubmittedFingerprint(fingerprint)
                 store.writeUploadedUris(emptySet())
-                _state.update { it.copy(hasOnlineAccount = true) }
+                applyAccount(response.getJSONObject("account"))
             } else if (store.readSubmittedFingerprint() != fingerprint) {
-                api.updateProfile(token, saved)
+                applyAccount(api.updateProfile(token, saved))
+                _state.update { it.copy(onlineQueue = null) }
                 store.writeSubmittedFingerprint(fingerprint)
                 store.writeUploadedUris(emptySet())
             }
@@ -180,7 +182,8 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshQueue() = onlineAction {
         val token = store.readServerToken()
         if (token.isBlank()) return@onlineAction
-        _state.update { it.copy(onlineQueue = RemoteClient(store.readServerUrl()).state(token).toOnlineQueueState()) }
+        val queue = RemoteClient(store.readServerUrl()).state(token).toOnlineQueueState()
+        _state.update { it.copy(onlineQueue = queue, onlineStatus = queue.accountStatus.takeIf(String::isNotBlank) ?: it.onlineStatus) }
     }
 
     fun joinOnlineQueue() = onlineAction {
@@ -235,9 +238,14 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun buildDemoMatch() {
+        if (state.value.demoMatch != null) return
         runCatching { MatchEngine.build(exampleQueue()) }
             .onSuccess { match -> _state.update { it.copy(demoMatch = match, message = null) } }
             .onFailure { error -> _state.update { it.copy(message = error.message ?: "Ошибка при формировании матча") } }
+    }
+
+    fun requestDemoTeams() {
+        _state.update { if (it.demoMatch != null) it.copy(demoScrollRequest = it.demoScrollRequest + 1) else it }
     }
 
     fun finishDemo(winner: Side) {

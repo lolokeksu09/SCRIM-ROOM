@@ -4,8 +4,12 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +38,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -86,9 +92,9 @@ private fun Headline(title: String, subtitle: String) {
 }
 
 @Composable
-private fun PanelCard(content: @Composable () -> Unit) {
+private fun PanelCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = Panel),
         border = BorderStroke(1.dp, Outline)
@@ -182,15 +188,17 @@ private fun Metric(value: String, label: String) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun <T> ChoiceRow(
     title: String, options: List<T>, value: T, text: (T) -> String, onChoose: (T) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Text(title, fontWeight = FontWeight.Bold, fontSize = 13.sp)
-        Row(
-            modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             options.forEach { option ->
                 FilterChip(
@@ -317,8 +325,10 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) {
+    val demoTeamsRequester = remember { BringIntoViewRequester() }
     val onlineAvailable = state.serverUrl.isNotBlank() && state.hasOnlineAccount
     LaunchedEffect(onlineAvailable) {
         while (isActive && onlineAvailable) {
@@ -378,7 +388,12 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
             StatusPill("Вымышленные игроки")
             Text("Демо-подбор никуда не отправляется и не влияет на реальные матчи.", color = Muted, fontSize = 13.sp)
             Text("${exampleQueue().size} тестовых участников", color = Accent, fontWeight = FontWeight.Bold)
-            SecondaryAction("Сформировать демо-матч") { vm.buildDemoMatch() }
+            if (state.demoMatch == null) {
+                SecondaryAction("Сформировать демо-матч") { vm.buildDemoMatch() }
+            } else {
+                StatusPill("Демо-матч сформирован", active = true)
+                SecondaryAction("Перейти к составам") { vm.requestDemoTeams() }
+            }
         }
         val match = state.demoMatch
         if (match != null) {
@@ -386,7 +401,12 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                 MiniMetric("${match.teamAverageGap}", "Разница средних", Modifier.weight(1f))
                 MiniMetric("${match.secondaryCount}", "Вторые роли", Modifier.weight(1f))
             }
-            TeamPanel("Демо · синие", match.blue, match.blueAverage, Blue)
+            TeamPanel("Демо · синие", match.blue, match.blueAverage, Blue,
+                modifier = Modifier.bringIntoViewRequester(demoTeamsRequester))
+            LaunchedEffect(match, state.demoScrollRequest) {
+                withFrameNanos { }
+                demoTeamsRequester.bringIntoView()
+            }
             TeamPanel("Демо · красные", match.red, match.redAverage, Red)
             PanelCard {
                 Eyebrow("Локальный демо-результат")
@@ -445,8 +465,8 @@ private fun MiniMetric(value: String, label: String, modifier: Modifier) {
 }
 
 @Composable
-private fun TeamPanel(title: String, entries: List<AssignedPlayer>, average: Int, color: Color) {
-    PanelCard {
+private fun TeamPanel(title: String, entries: List<AssignedPlayer>, average: Int, color: Color, modifier: Modifier = Modifier) {
+    PanelCard(modifier) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Box(modifier = Modifier.size(8.dp).background(color, RoundedCornerShape(50)))
             Spacer(Modifier.width(9.dp))

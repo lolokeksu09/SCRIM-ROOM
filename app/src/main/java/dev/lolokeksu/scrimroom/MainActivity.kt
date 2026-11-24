@@ -136,7 +136,7 @@ private fun AppHeader() {
             Text("CUSTOM MATCH OPERATIONS", fontSize = 9.sp, color = Color(0xFF90999B), letterSpacing = 1.0.sp)
         }
         Text(
-            "PILOT 0.2", fontSize = 10.sp, fontWeight = FontWeight.Bold,
+            "PILOT ${BuildConfig.VERSION_NAME}", fontSize = 10.sp, fontWeight = FontWeight.Bold,
             color = Color(0xFFCCE879),
             modifier = Modifier.background(Color(0xFF20291C), RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 6.dp)
         )
