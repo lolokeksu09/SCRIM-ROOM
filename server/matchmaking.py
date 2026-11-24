@@ -2,7 +2,9 @@
 from itertools import product, combinations
 
 ROLES = ('BARON', 'JUNGLE', 'MID', 'DRAGON', 'SUPPORT')
-ALGORITHM = 'role-aware-v2'
+ALGORITHM = 'role-aware-v3'
+MAX_AVERAGE_GAP = 120
+MAX_ROLE_GAP = 400
 
 def weights(wait_seconds):
     # Gradually relax preference/diversity penalties, not role feasibility or skill parity.
@@ -50,6 +52,8 @@ def arrange(players,repeat_pairs=None,wait_seconds=0):
             if side_cost(red,blue)<side_cost(blue,red):
                 blue,red=red,blue
             m=balance_metrics(blue,red,repeat_pairs,wait_seconds)
+            if m['average_gap']>MAX_AVERAGE_GAP or max(m['role_gaps'].values())>MAX_ROLE_GAP:
+                continue
             objective=(m['score'],m['secondary_count'],m['average_gap'],side_cost(blue,red))
             if best is None or objective<best[2]:
                 best=(blue.copy(),red.copy(),objective)
@@ -65,3 +69,61 @@ def arrange(players,repeat_pairs=None,wait_seconds=0):
             allocations[role].pop()
     assign(0)
     return best
+
+
+def feasible_roster(players):
+    """Earliest feasible roster via augmenting paths over ten role slots.
+
+    At most ten recursive moves per candidate; no combinatorial enumeration
+    of ten-player subsets and no fixed prefix of the queue.
+    """
+    slots=[role for role in ROLES for _ in range(2)]
+    owners=[None]*10
+    def augment(p,seen):
+        for role in dict.fromkeys((p['primary'],p['secondary'])):
+            for i,r in enumerate(slots):
+                if r!=role or i in seen: continue
+                seen.add(i)
+                if owners[i] is None or augment(owners[i],seen):
+                    owners[i]=p
+                    return True
+        return False
+    for p in players:
+        if augment(p,set()) and all(owner is not None for owner in owners):
+            chosen={p['id'] for p in owners}
+            return [p for p in players if p['id'] in chosen]
+    return None
+
+def choose_match(players,repeats,stamp):
+    """Try earliest role-feasible ten, then bounded alternative cohorts.
+
+    Search all candidates for role coverage. Balance search is intentionally
+    bounded, so a feasible *balanced* roster is not guaranteed to be found.
+    """
+    first=feasible_roster(players)
+    if first is None:return None
+    tried=set()
+    def evaluate(roster):
+        if roster is None:return None
+        key=tuple(sorted(p['id'] for p in roster))
+        if key in tried:return None
+        tried.add(key)
+        wait=max(0,stamp-min(p['joined_at'] for p in roster))
+        result=arrange(roster,repeat_pairs=repeats,wait_seconds=wait)
+        return (result,wait) if result else None
+    result=evaluate(first)
+    if result:return result
+    # Prioritize alternative rosters which preserve the earliest waiting players.
+    for excluded in reversed(first):
+        result=evaluate(feasible_roster([p for p in players if p['id']!=excluded['id']]))
+        if result:return result
+    # Overlapping rating cohorts; inspect the 12 oldest represented cohorts.
+    # This avoids an outlier occupying the earliest feasible roster forever.
+    bands={}
+    for p in players:
+        for low in ((p['rating']//200)*200-200,(p['rating']//200)*200):
+            bands.setdefault(low,[]).append(p)
+    for cohort in sorted((v for v in bands.values() if len(v)>=10),key=lambda v:v[0]['joined_at'])[:12]:
+        result=evaluate(feasible_roster(cohort))
+        if result:return result
+    return None

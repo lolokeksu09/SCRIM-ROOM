@@ -416,6 +416,7 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                         info?.queued == true -> {
                             Text(if (info.sessionId != null) "Поиск в игровой сессии" else "Поиск запущен", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                             Text("Игроков в текущей очереди: ${info.waiting}", color = Muted, fontSize = 13.sp)
+                            Text("Поиск ждёт допустимое распределение всех ролей и баланс оценок. Матч может не появиться сразу даже при 10+ игроках.",color=Muted,fontSize=12.sp)
                             Text("Без связи с сервером поиск прекращается через 90 секунд. Для свёрнутого приложения включи наблюдение в настройках.",color=Muted,fontSize=12.sp)
                             SecondaryAction("Покинуть очередь", enabled = !state.onlineBusy) { vm.leaveOnlineQueue() }
                         }
@@ -552,6 +553,10 @@ private fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boolea
             if (match.serverNow>0) Text(String.format(Locale.ROOT,"%02d:%02d",remaining/60,remaining%60), color = if (remaining<=20) Red else Accent, fontWeight = FontWeight.Black, fontSize = 32.sp)
             PrimaryAction(if (match.ownReady) "Готовность подтверждена" else "Я готов", enabled = !busy && !match.ownReady && (match.serverNow==0L || remaining>0)) { vm.readyOnlineMatch(match.id) }
             SecondaryAction("Отказаться", enabled = !busy && (match.serverNow==0L || remaining>0)) { vm.declineOnlineMatch(match.id) }
+        }
+        if (match.status in listOf("ACTIVE","DISPUTED") && match.phaseExpiresAt>0) {
+            Text("Срок завершения: "+SimpleDateFormat("dd.MM HH:mm",Locale("ru")).format(Date(match.phaseExpiresAt*1000)),color=Muted,fontSize=12.sp)
+            Text("Если результат не подтверждён к этому времени, матч аннулируется без изменения оценки.",color=Muted,fontSize=12.sp)
         }
         if (match.status == "ACTIVE") {
             Eyebrow("Игровое лобби")

@@ -6,7 +6,8 @@ A moderator must review voluntarily uploaded evidence before approving any playe
 from __future__ import annotations
 
 import hashlib
-from itertools import combinations
+import asyncio
+import logging
 import hmac
 import io
 import os
@@ -15,7 +16,7 @@ import sqlite3
 import threading
 import time
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, asynccontextmanager
 from typing import Literal
 from pathlib import Path
 
@@ -26,7 +27,7 @@ from server.request_guard import RequestBodyLimit
 from pydantic import BaseModel, Field, field_validator, model_validator
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from server.matchmaking import ROLES, arrange, balance_metrics
+from server.matchmaking import ROLES, choose_match, balance_metrics
 from server.match_intelligence import enrich_candidates, save_quality, load_quality
 from server.ocr import recognize_stats, OcrUnavailable
 
@@ -36,6 +37,10 @@ MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_EVIDENCE = 4
 MAX_PIXELS = 16_000_000
 QUEUE_IDLE_SECONDS = 90
+ACTIVE_TIMEOUT_SECONDS = 2 * 3600
+DISPUTE_TIMEOUT_SECONDS = 48 * 3600
+MAINTENANCE_INTERVAL_SECONDS = 10
+log = logging.getLogger(__name__)
 
 
 def now_ts() -> int:
@@ -153,6 +158,10 @@ class Database:
                   id TEXT PRIMARY KEY, region TEXT NOT NULL,
                   status TEXT NOT NULL, created_at INTEGER NOT NULL, deadline INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS match_phase_deadlines(
+                  match_id TEXT PRIMARY KEY REFERENCES matches(id), expires_at INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS match_phase_expiry ON match_phase_deadlines(expires_at);
                 CREATE TABLE IF NOT EXISTS match_players(
                   match_id TEXT NOT NULL REFERENCES matches(id),
                   account_id TEXT NOT NULL REFERENCES accounts(id),
@@ -281,6 +290,7 @@ def _match_info(db, match_id, viewer_id=None, moderator=False):
         'result': dict(result) if result else None,
         'ready_count': sum(x['ready'] for x in players),
         'deadline': match['deadline'],
+        'phase_expires_at': phase_deadline(db,match),
         'blue': [{'account_id': x['account_id'], 'riot_id': x['riot_id'], 'rating_seed': x['rating'], 'role': x['role'], 'ready': bool(x['ready'])} for x in players if x['side']=='BLUE'],
         'red': [{'account_id': x['account_id'], 'riot_id': x['riot_id'], 'rating_seed': x['rating'], 'role': x['role'], 'ready': bool(x['ready'])} for x in players if x['side']=='RED'],
     }
@@ -312,6 +322,28 @@ def _finish_result(db, mid, winner, source):
             db.execute('UPDATE accounts SET rating=? WHERE id=?',(after,p['account_id']))
             db.execute('INSERT INTO rating_changes VALUES(?,?,?,?)',(mid,p['account_id'],p['rating'],after))
     db.execute("UPDATE matches SET status='CLOSED' WHERE id=?",(mid,))
+    db.execute('DELETE FROM match_phase_deadlines WHERE match_id=?',(mid,))
+
+
+def phase_deadline(db,match):
+    if match['status']=='READY_CHECK': return match['deadline']
+    if match['status'] not in ('ACTIVE','DISPUTED'): return None
+    row=db.execute('SELECT expires_at FROM match_phase_deadlines WHERE match_id=?',(match['id'],)).fetchone()
+    if row:return row['expires_at']
+    # Backward-compatible fallback for matches assigned before RC.3.
+    if match['status']=='ACTIVE': return match['deadline']+ACTIVE_TIMEOUT_SECONDS
+    last=db.execute('SELECT max(reported_at) AS last FROM match_reports WHERE match_id=?',(match['id'],)).fetchone()['last']
+    return (last or match['deadline'])+DISPUTE_TIMEOUT_SECONDS
+
+
+def set_phase_deadline(db,mid,seconds):
+    db.execute('INSERT INTO match_phase_deadlines VALUES(?,?) ON CONFLICT(match_id) DO UPDATE SET expires_at=excluded.expires_at',(mid,now_ts()+seconds))
+
+
+def expire_unresolved_matches(db):
+    for match in db.execute("SELECT * FROM matches WHERE status IN ('ACTIVE','DISPUTED')").fetchall():
+        if phase_deadline(db,match)<=now_ts():
+            _finish_result(db,match['id'],'VOID','TIMEOUT')
 
 
 def session_status(row):
@@ -381,27 +413,21 @@ def _expire_ready_checks(db):
 
 
 def _try_match(db, region, session_id=None):
-    # Choose earliest feasible ten within the first twelve to reduce role starvation.
+    # Role coverage spans the whole live regional/session queue.
     waiters = db.execute('''
       SELECT a.id,a.riot_id,a.region,a.primary_role AS "primary",
       a.secondary_role AS secondary,a.rating,q.joined_at
       FROM queue q JOIN accounts a ON a.id=q.account_id LEFT JOIN queue_sessions qs ON qs.account_id=q.account_id
       WHERE q.region=? AND a.status='APPROVED' AND qs.session_id IS ?
-      ORDER BY q.joined_at,q.rowid LIMIT 12
+      ORDER BY q.joined_at,q.rowid
     ''', (region,session_id)).fetchall()
     if len(waiters) < 10:
         return
     candidates, repeats = enrich_candidates(db,[dict(w) for w in waiters],now_ts())
-    arranged = None
-    selected_wait = 0
-    for indexes in combinations(range(len(candidates)), 10):
-        selected = [candidates[i] for i in indexes]
-        selected_wait = max(0,now_ts()-min(w['joined_at'] for w in selected))
-        arranged = arrange(selected, repeat_pairs=repeats, wait_seconds=selected_wait)
-        if arranged is not None:
-            break
-    if arranged is None:
+    picked=choose_match(candidates,repeats,now_ts())
+    if picked is None:
         return
+    arranged,selected_wait=picked
     blue, red, _ = arranged
     quality=balance_metrics(blue,red,repeats,selected_wait)
     mid = uuid.uuid4().hex
@@ -413,6 +439,19 @@ def _try_match(db, region, session_id=None):
         for p, role in team:
             db.execute('INSERT INTO match_players(match_id,account_id,side,role) VALUES(?,?,?,?)', (mid,p['id'],side,role))
             db.execute('DELETE FROM queue WHERE account_id=?', (p['id'],))
+
+
+def maintenance_tick(store):
+    """One transactional maintenance pass, independent of incoming clients."""
+    with store.transaction(write=True) as db:
+        _expire_ready_checks(db)
+        expire_unresolved_matches(db)
+        clean_session_queues(db)
+        scopes=db.execute("""SELECT q.region,qs.session_id FROM queue q
+          LEFT JOIN queue_sessions qs ON qs.account_id=q.account_id
+          GROUP BY q.region,qs.session_id HAVING count(*)>=10""").fetchall()
+        for scope in scopes:
+            _try_match(db,scope['region'],scope['session_id'])
 
 
 def _read_safe_image(content: bytes) -> bytes:
@@ -437,7 +476,23 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.2', docs_url=None, redoc_url=None, openapi_url=None)
+    @asynccontextmanager
+    async def lifespan(app):
+        async def loop():
+            while True:
+                await asyncio.sleep(MAINTENANCE_INTERVAL_SECONDS)
+                try:
+                    await asyncio.to_thread(maintenance_tick,store)
+                except Exception:
+                    log.exception('Match maintenance pass failed')
+        task=asyncio.create_task(loop())
+        try:
+            yield
+        finally:
+            task.cancel()
+            try: await task
+            except asyncio.CancelledError: pass
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.3', docs_url=None, redoc_url=None, openapi_url=None,lifespan=lifespan)
     app.add_middleware(RequestBodyLimit)
 
     @app.exception_handler(RequestValidationError)
@@ -675,6 +730,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
         with store.transaction(write=True) as db:
             user=get_user(db,token)
             _expire_ready_checks(db)
+            expire_unresolved_matches(db)
             clean_session_queues(db)
             match_id=_active_match_id(db,user['id'])
             queued=db.execute('SELECT 1 FROM queue WHERE account_id=?',(user['id'],)).fetchone() is not None
@@ -693,6 +749,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
         # Commit expiration before enforcing cooldown; an HTTP error must not roll it back.
         with store.transaction(write=True) as db:
             _expire_ready_checks(db)
+            expire_unresolved_matches(db)
             clean_session_queues(db)
         with store.transaction(write=True) as db:
             user=get_user(db,token)
@@ -736,6 +793,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
     @app.post('/v1/matches/{match_id}/ready')
     def ready(match_id:str,token=Depends(token_header)):
         with store.transaction(write=True) as db:
+            match_member(db,token,match_id)
             _expire_ready_checks(db)
         with store.transaction(write=True) as db:
             user,mp=match_member(db,token,match_id)
@@ -746,11 +804,13 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             count=db.execute('SELECT sum(ready) FROM match_players WHERE match_id=?',(match_id,)).fetchone()[0]
             if count==10:
                 db.execute("UPDATE matches SET status='ACTIVE' WHERE id=?",(match_id,))
+                set_phase_deadline(db,match_id,ACTIVE_TIMEOUT_SECONDS)
             return _match_info(db,match_id,viewer_id=user['id'])
 
     @app.post('/v1/matches/{match_id}/decline')
     def decline(match_id:str,token=Depends(token_header)):
         with store.transaction(write=True) as db:
+            match_member(db,token,match_id)
             _expire_ready_checks(db)
         with store.transaction(write=True) as db:
             user,_=match_member(db,token,match_id)
@@ -764,10 +824,16 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
                 WHERE mp.match_id=? AND a.id!=? AND a.status='APPROVED' ''',(match_id,user['id'])).fetchall()
             for other in others:
                 requeue_match_player(db,match_id,other)
+            clean_session_queues(db)
+            scope=db.execute('SELECT session_id FROM match_sessions WHERE match_id=?',(match_id,)).fetchone()
+            _try_match(db,match['region'],scope['session_id'] if scope else None)
             return {'status':'CANCELLED'}
 
     @app.post('/v1/matches/{match_id}/result')
     def report_result(match_id: str, payload: ResultIn, token=Depends(token_header)):
+        with store.transaction(write=True) as db:
+            match_member(db,token,match_id)
+            expire_unresolved_matches(db)
         with store.transaction(write=True) as db:
             user, member = match_member(db,token,match_id)
             if member['role']!='BARON':
@@ -787,6 +853,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
                     _finish_result(db,match_id,payload.winner,'CAPTAINS')
                 else:
                     db.execute("UPDATE matches SET status='DISPUTED' WHERE id=?",(match_id,))
+                    set_phase_deadline(db,match_id,DISPUTE_TIMEOUT_SECONDS)
             return _match_info(db,match_id,viewer_id=user['id'])
 
     @app.get('/v1/me/results')
@@ -802,6 +869,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
 
     @app.post('/v1/admin/matches/{match_id}/resolve', dependencies=[Depends(admin_auth)])
     def resolve_result(match_id:str,payload:ResolutionIn):
+        with store.transaction(write=True) as db: expire_unresolved_matches(db)
         with store.transaction(write=True) as db:
             row=db.execute('SELECT status FROM matches WHERE id=?',(match_id,)).fetchone()
             if not row or row['status']!='DISPUTED':
@@ -828,6 +896,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
     def admin_matches():
         with store.transaction(write=True) as db:
             _expire_ready_checks(db)
+            expire_unresolved_matches(db)
             rows = db.execute("SELECT id FROM matches WHERE status IN ('READY_CHECK','ACTIVE','DISPUTED') ORDER BY created_at DESC").fetchall()
             return [_match_info(db, row['id'],moderator=True) for row in rows]
 

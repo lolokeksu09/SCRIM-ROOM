@@ -246,7 +246,8 @@ data class OnlineMatch(
     val ownArrived: Boolean = false,
     val ownEvidence: Boolean = false,
     val evidenceCount: Int = 0,
-    val quality: MatchQuality? = null
+    val quality: MatchQuality? = null,
+    val phaseExpiresAt: Long = 0
 )
 data class MatchQuality(val averageGap: Double,val secondaryCount: Int,val repeatedPairs: Int)
 
@@ -286,7 +287,8 @@ fun JSONObject.toOnlineQueueState(): OnlineQueueState {
         matchObj.optString("lobby_room").takeUnless { it.isBlank() || it == "null" },
         matchObj.optInt("lobby_arrivals"), matchObj.optBoolean("own_arrived"), matchObj.optBoolean("own_evidence"),
         matchObj.optJSONArray("evidence_sides")?.length() ?: 0,
-        matchObj.optJSONObject("quality")?.let { MatchQuality(it.getDouble("average_gap"),it.getInt("secondary_count"),it.getInt("repeated_pairs")) }
+        matchObj.optJSONObject("quality")?.let { MatchQuality(it.getDouble("average_gap"),it.getInt("secondary_count"),it.getInt("repeated_pairs")) },
+        matchObj.optLong("phase_expires_at")
     )
     return OnlineQueueState(optString("account_status"), optBoolean("queued"),
         optInt("waiting_in_region"), match, optJSONObject("discipline")?.optInt("incidents") ?: 0,

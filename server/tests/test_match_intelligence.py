@@ -44,7 +44,7 @@ def test_private_snapshot_and_existing_elo_unchanged(tmp_path):
         mid,users,b,r,other=setup_match(c)
         first=c.get('/v1/queue/state',headers=auth(b)).json()['match']['quality']
         assert set(first)=={'algorithm','average_gap','secondary_count','repeated_pairs'}
-        assert first['algorithm']=='role-aware-v2' and first['average_gap']==0
+        assert first['algorithm']=='role-aware-v3' and first['average_gap']==0
         outsider=register(c,2800)
         assert c.get('/v1/admin/match-quality',headers=auth(outsider)).status_code==403
         history=c.get('/v1/admin/match-quality',headers=admin()).json()['matches']

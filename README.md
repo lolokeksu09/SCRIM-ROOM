@@ -1,4 +1,4 @@
-# SCRIM ROOM — 1.0.0-rc.2
+# SCRIM ROOM — 1.0.0-rc.3
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
@@ -152,3 +152,6 @@ Queue presence: an idle waiting entry expires after 90 seconds without authentic
 
 ## 1.0.0-rc.2 — release hardening
 Closed-by-default registration in Docker; bounded request bodies; no reflected validation input or exposed OpenAPI schema; exact-revision CI gates for signed releases; disposable Docker deployment, backup and persistence smoke workflow. Set SCRIM_REGISTRATION_OPEN=1 explicitly for an intake window. No live deployment or release signing claimed.
+
+## 1.0.0-rc.3 — Matchmaking & Stability
+The role-feasibility pass scans the full live regional/session queue using augmenting paths over ten role slots. It tries the earliest feasible roster, up to ten single-player exclusions and up to twelve overlapping rating cohorts if the first roster is unbalanced. Balance search remains bounded, not exhaustive. Hard pilot limits: average effective team strength difference <=120 and opposing same-role strength difference <=400, independent of wait time. These are policy defaults, not empirically calibrated thresholds. One maintenance pass every ten seconds expires ready checks and stale queue entries, voids overdue active matches (2h from readiness) and unresolved disputes (48h from disagreement) without Elo change, and attempts one match per eligible queue scope. Decline triggers immediate rematch if possible. The additive phase-deadline table preserves old match rows; pre-RC.3 active deadlines fall back to ready deadline +2h and disputes to latest report +48h. Existing expired matches may be voided on startup maintenance; back up SQLite before upgrading. Timeouts are visible to users and moderators. No deployment or change to Ventry domain. Evidence and anti-collusion policy remain RC.4 work.

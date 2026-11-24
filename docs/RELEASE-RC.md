@@ -1,4 +1,4 @@
-# SCRIM ROOM 1.0.0-rc.2 — release gate
+# SCRIM ROOM 1.0.0-rc.3 — release gate
 
 This is an invited-club release candidate, not a public launch.
 
@@ -37,3 +37,6 @@ Before each upgrade, run the backup CLI described in README; record source revis
 
 ## RC.2 safeguards
 Compose defaults to closed registration (`SCRIM_REGISTRATION_OPEN=0`); existing accounts and recovery remain available. Set the variable to `1` only for an authorized intake window, recreate the service, then close registration again. This is not an invitation-code system; account ownership remains a manual gate. Request bodies are bounded before JSON/multipart parsing (32 KiB normal, 4 MiB + 64 KiB multipart for evidence). Validation errors do not reflect submitted input. OpenAPI is disabled. Release workflow requires successful debug/API, emulator, browser and container workflows on the exact commit before signing. Container CI runs on disposable test data only; it does not touch the VDS.
+
+## RC.3 safeguards
+Full-queue role feasibility; bounded alternate rosters; fixed maximum average gap 120 and role gap 400; periodic maintenance and explicit 2h active / 48h dispute timeouts with VOID and no Elo changes. Backup before upgrade: legacy overdue matches can be closed by maintenance. Review actual pilot outcomes before modifying thresholds; no assertion of Riot MMR or guaranteed fair outcome.
