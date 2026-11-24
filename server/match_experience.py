@@ -115,7 +115,10 @@ def install_match_experience(app,store,token_header,admin_auth,limit,match_membe
                 role=roles[row['role']]
                 role['played']+=1; role['wins']+=int(won); role['losses']+=int(not won)
             count=wins+losses
+            from server.match_intelligence import role_estimates
+            estimates=role_estimates(db,user['id'],user['rating'])
             return {'played':count,'wins':wins,'losses':losses,'voids':voids,
+                'role_estimates':estimates,
                 'win_rate':round(100*wins/count,1) if count else None,
                 'calibration':{'completed':min(count,10),'target':10,'provisional':count<10},
                 'roles':roles}

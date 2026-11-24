@@ -112,7 +112,8 @@ class RemoteClient(baseInput: String) {
             calibration.getInt("completed"),calibration.getInt("target"),
             listOf("BARON","JUNGLE","MID","DRAGON","SUPPORT").map { role ->
                 val row=roles.getJSONObject(role)
-                RoleStats(role,row.getInt("played"),row.getInt("wins"),row.getInt("losses"))
+                val estimate=obj.optJSONObject("role_estimates")?.optJSONObject(role)
+                RoleStats(role,row.getInt("played"),row.getInt("wins"),row.getInt("losses"),estimate?.optInt("estimate"),estimate?.optInt("sample"),estimate?.optInt("uncertainty"))
             })
     }
     fun uploadResultEvidence(token: String, matchId: String, resolver: ContentResolver, uri: Uri) =
@@ -214,11 +215,13 @@ data class OnlineMatch(
     val lobbyArrivals: Int = 0,
     val ownArrived: Boolean = false,
     val ownEvidence: Boolean = false,
-    val evidenceCount: Int = 0
+    val evidenceCount: Int = 0,
+    val quality: MatchQuality? = null
 )
+data class MatchQuality(val averageGap: Double,val secondaryCount: Int,val repeatedPairs: Int)
 
 data class OnlineResult(val id: String, val winner: String, val side: String, val resolvedAt: Long, val role: String = "")
-data class RoleStats(val role: String,val played: Int,val wins: Int,val losses: Int)
+data class RoleStats(val role: String,val played: Int,val wins: Int,val losses: Int,val estimate: Int? = null,val sample: Int? = null,val uncertainty: Int? = null)
 data class PersonalStats(val played: Int,val wins: Int,val losses: Int,val voids: Int,val winRate: Double?,val calibrated: Int,val target: Int,val roles: List<RoleStats>)
 
 data class OcrSuggestions(val slot: Int, val matches: Int?, val winRate: Double?, val kda: Double?, val ranks: List<String>)
@@ -252,7 +255,8 @@ fun JSONObject.toOnlineQueueState(): OnlineQueueState {
         android.os.SystemClock.elapsedRealtime(), matchObj.optBoolean("lobby_host"),
         matchObj.optString("lobby_room").takeUnless { it.isBlank() || it == "null" },
         matchObj.optInt("lobby_arrivals"), matchObj.optBoolean("own_arrived"), matchObj.optBoolean("own_evidence"),
-        matchObj.optJSONArray("evidence_sides")?.length() ?: 0
+        matchObj.optJSONArray("evidence_sides")?.length() ?: 0,
+        matchObj.optJSONObject("quality")?.let { MatchQuality(it.getDouble("average_gap"),it.getInt("secondary_count"),it.getInt("repeated_pairs")) }
     )
     return OnlineQueueState(optString("account_status"), optBoolean("queued"),
         optInt("waiting_in_region"), match, optJSONObject("discipline")?.optInt("incidents") ?: 0,

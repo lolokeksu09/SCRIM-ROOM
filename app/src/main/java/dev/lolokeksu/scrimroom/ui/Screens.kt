@@ -525,6 +525,11 @@ private fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boolea
         Text(when(match.status) { "READY_CHECK" -> "Матч найден · подтверждение"; "DISPUTED" -> "Результат оспаривается"; else -> "Матч подтверждён" },
             fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Text("Готово игроков: ${match.readyCount}/10", color = Accent, fontSize = 13.sp)
+        match.quality?.let { quality ->
+            Eyebrow("Баланс составов")
+            Text("Разница средней оценки: ${quality.averageGap} · Вторых ролей: ${quality.secondaryCount}",color=Muted,fontSize=12.sp)
+            Text("Повторных пар союзников: ${quality.repeatedPairs}. Оценка не гарантирует равный исход.",color=Muted,fontSize=12.sp)
+        }
         if (match.status == "READY_CHECK") {
             Text("Подтверди готовность в течение трёх минут после создания матча. Если не все ответят, матч отменится.", color = Muted, fontSize = 12.sp)
             if (match.serverNow>0) Text(String.format(Locale.ROOT,"%02d:%02d",remaining/60,remaining%60), color = if (remaining<=20) Red else Accent, fontWeight = FontWeight.Black, fontSize = 32.sp)
@@ -650,8 +655,10 @@ fun HistoryScreen(results: List<DemoResult>, state: ScrimUiState, vm: ScrimViewM
                     Text(if(stats.calibrated<stats.target) "Предварительная оценка; выборка пока мала." else "Начальная выборка собрана. Оценка не является Riot MMR.",color=Muted,fontSize=12.sp)
                     HorizontalDivider(color=Outline)
                     Eyebrow("По фактическим ролям")
+                    Text("Оценки основаны на последних 30 подтверждённых играх; неопределённость — показатель размера выборки, не доверительный интервал.",color=Muted,fontSize=12.sp)
                     stats.roles.forEach { role ->
                         Text("${Role.entries.firstOrNull { it.name==role.role }?.title ?: role.role}: ${role.played} игр · ${role.wins} побед · ${role.losses} поражений",fontSize=13.sp)
+                        if(role.estimate!=null) Text("Оценка для подбора: ${role.estimate} · Выборка: ${role.sample ?: 0} · Неопределённость: ${role.uncertainty ?: 0}",color=Muted,fontSize=11.sp)
                     }
                 }
             }

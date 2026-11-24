@@ -3,11 +3,11 @@ const $=id=>document.getElementById(id);
 const ranks={BELOW_MASTER:'Алмаз и ниже',MASTER:'Мастер',GRANDMASTER:'Грандмастер',CHALLENGER:'Претендент',SOVEREIGN:'Суверен'};
 const roles={BARON:'Барон',JUNGLE:'Лес',MID:'Мид',DRAGON:'ADC',SUPPORT:'Поддержка'};
 const labels={PENDING_REVIEW:'На проверке',APPROVED:'Допущен',REJECTED:'Отклонён',READY_CHECK:'Подтверждение',ACTIVE:'Активный',DISPUTED:'Спорный результат'};
-let key='',accounts=[],matches=[],sessions=[],complaints=[],selected=null,epoch=0,busy=false,images=[];
+let key='',accounts=[],matches=[],sessions=[],complaints=[],qualityHistory=[],selected=null,epoch=0,busy=false,images=[];
 const node=(tag,value,cls)=>{const n=document.createElement(tag);if(value!==undefined)n.textContent=value;if(cls)n.className=cls;return n};
 function say(message){$('notice').textContent=message}
 function releaseImages(){if($('preview').open)$('preview').close();$('fullImage').removeAttribute('src');images.forEach(URL.revokeObjectURL);images=[]}
-function logout(message=''){epoch++;key='';accounts=[];matches=[];sessions=[];complaints=[];selected=null;busy=false;releaseImages();$('list').replaceChildren();$('detail').replaceChildren();$('matchList').replaceChildren();$('sessionList').replaceChildren();$('complaintList').replaceChildren();$('sessionForm').reset();$('metrics').replaceChildren();$('key').value='';$('workspace').hidden=true;$('logout').hidden=true;$('login').hidden=false;say(message)}
+function logout(message=''){epoch++;key='';accounts=[];matches=[];sessions=[];complaints=[];qualityHistory=[];selected=null;busy=false;releaseImages();$('list').replaceChildren();$('detail').replaceChildren();$('matchList').replaceChildren();$('qualityHistory').replaceChildren();$('sessionList').replaceChildren();$('complaintList').replaceChildren();$('sessionForm').reset();$('metrics').replaceChildren();$('key').value='';$('workspace').hidden=true;$('logout').hidden=true;$('login').hidden=false;say(message)}
 async function api(path,options={}){
  const session=key;const version=epoch;
  const response=await fetch('/v1/admin'+path,{...options,cache:'no-store',credentials:'omit',headers:{'X-Admin-Key':session,...options.headers}});
@@ -17,8 +17,8 @@ async function api(path,options={}){
  return response;
 }
 async function load(){
- const session=key;const results=await Promise.all([api('/accounts').then(r=>r.json()),api('/matches').then(r=>r.json()),api('/sessions').then(r=>r.json()),api('/complaints').then(r=>r.json())]);
- if(!key||key!==session)return;[accounts,matches]=results;sessions=results[2].sessions;complaints=results[3].reports;render();if(selected){const current=accounts.find(a=>a.id===selected.id);if(current)await detail(current);else{selected=null;$('detail').replaceChildren(node('p','Выберите заявку.'))}}
+ const session=key;const results=await Promise.all([api('/accounts').then(r=>r.json()),api('/matches').then(r=>r.json()),api('/sessions').then(r=>r.json()),api('/complaints').then(r=>r.json()),api('/match-quality').then(r=>r.json())]);
+ if(!key||key!==session)return;[accounts,matches]=results;sessions=results[2].sessions;complaints=results[3].reports;qualityHistory=results[4].matches;render();if(selected){const current=accounts.find(a=>a.id===selected.id);if(current)await detail(current);else{selected=null;$('detail').replaceChildren(node('p','Выберите заявку.'))}}
 }
 function render(){
  $('metrics').replaceChildren(...[['На проверке',accounts.filter(a=>a.status==='PENDING_REVIEW').length],['Допущены',accounts.filter(a=>a.status==='APPROVED').length],['Отклонены',accounts.filter(a=>a.status==='REJECTED').length],['Матчи',matches.length]].map(([label,count])=>{const n=node('div',undefined,'metric');n.append(node('strong',String(count)),node('small',label));return n}));
@@ -26,9 +26,9 @@ function render(){
  const filtered=accounts.filter(a=>(f==='ALL'||f===a.status)&&(!q||(a.riot_id+' '+a.region).toLocaleLowerCase().includes(q)));
  $('list').replaceChildren(...filtered.map(a=>{const b=node('button',a.riot_id,'account');b.type='button';b.setAttribute('aria-pressed',String(selected?.id===a.id));b.append(node('small',(labels[a.status]||a.status)+' · '+a.evidence_count+' фото · '+a.region));b.onclick=()=>{if(!busy)detail(a).catch(e=>{if(key)say(e.message)})};return b}));
  if(!filtered.length)$('list').append(node('p','Нет заявок по выбранному фильтру.'));
- $('matchList').replaceChildren(...matches.map(m=>{const card=node('article',undefined,'match');card.append(node('h2',(labels[m.status]||m.status)+' · '+m.region),node('p','Готовность: '+m.ready_count+'/10'));const teams=node('div',undefined,'teams');for(const [name,players] of [['Синие',m.blue],['Красные',m.red]]){const team=node('section');team.append(node('strong',name));players.forEach(p=>team.append(node('p',(roles[p.role]||p.role)+' · '+p.riot_id+(p.ready?' ✓':''))));teams.append(team)}card.append(teams);if(m.lobby_room)card.append(node('p','Лобби: '+m.lobby_room+' · Отметились '+m.lobby_arrivals+'/10'));for(const side of (m.evidence_sides||[])){const b=node('button','Скриншот: '+(side==='BLUE'?'синие':'красные'));b.onclick=async()=>{const version=epoch;try{const res=await api('/matches/'+encodeURIComponent(m.id)+'/evidence/'+encodeURIComponent(side));const blob=await res.blob();if(version!==epoch||!key)return;const url=URL.createObjectURL(blob);images.push(url);$('fullImage').src=url;$('preview').showModal()}catch(e){if(key)say(e.message)}};card.append(b)}if(m.status==='ACTIVE'){card.append(node('p','Подтверждений капитанов: '+m.report_count+'/2'));const b=node('button','Аннулировать без очков','danger');b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/close',null,'Аннулировать матч без изменения оценки?');card.append(b)}if(m.status==='DISPUTED'){card.append(node('p','Капитан синих: '+m.reports.BLUE+' · Капитан красных: '+m.reports.RED),node('p','Проверьте прикреплённые скриншоты и обстоятельства перед решением.'));const a=node('div',undefined,'actions');for(const [winner,label] of [['BLUE','Победа синих'],['RED','Победа красных'],['VOID','Аннулировать']]){const b=node('button',label);b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/resolve',null,'Подтвердить решение: '+label+'?',{winner});a.append(b)}card.append(a)}return card}));
+ $('matchList').replaceChildren(...matches.map(m=>{const card=node('article',undefined,'match');card.append(node('h2',(labels[m.status]||m.status)+' · '+m.region),node('p','Готовность: '+m.ready_count+'/10'));const teams=node('div',undefined,'teams');for(const [name,players] of [['Синие',m.blue],['Красные',m.red]]){const team=node('section');team.append(node('strong',name));players.forEach(p=>team.append(node('p',(roles[p.role]||p.role)+' · '+p.riot_id+(p.ready?' ✓':''))));teams.append(team)}card.append(teams);if(m.quality)card.append(qualityCard(m.quality));if(m.lobby_room)card.append(node('p','Лобби: '+m.lobby_room+' · Отметились '+m.lobby_arrivals+'/10'));for(const side of (m.evidence_sides||[])){const b=node('button','Скриншот: '+(side==='BLUE'?'синие':'красные'));b.onclick=async()=>{const version=epoch;try{const res=await api('/matches/'+encodeURIComponent(m.id)+'/evidence/'+encodeURIComponent(side));const blob=await res.blob();if(version!==epoch||!key)return;const url=URL.createObjectURL(blob);images.push(url);$('fullImage').src=url;$('preview').showModal()}catch(e){if(key)say(e.message)}};card.append(b)}if(m.status==='ACTIVE'){card.append(node('p','Подтверждений капитанов: '+m.report_count+'/2'));const b=node('button','Аннулировать без очков','danger');b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/close',null,'Аннулировать матч без изменения оценки?');card.append(b)}if(m.status==='DISPUTED'){card.append(node('p','Капитан синих: '+m.reports.BLUE+' · Капитан красных: '+m.reports.RED),node('p','Проверьте прикреплённые скриншоты и обстоятельства перед решением.'));const a=node('div',undefined,'actions');for(const [winner,label] of [['BLUE','Победа синих'],['RED','Победа красных'],['VOID','Аннулировать']]){const b=node('button',label);b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/resolve',null,'Подтвердить решение: '+label+'?',{winner});a.append(b)}card.append(a)}return card}));
  if(!matches.length)$('matchList').append(node('p','Назначенных матчей нет.'));
- renderSessions();renderComplaints();
+ renderSessions();renderComplaints();renderQualityHistory();
 }
 async function detail(a){
  releaseImages();selected=a;const version=++epoch;render();
@@ -84,4 +84,19 @@ function renderComplaints(){
    return a
  }));
  if(!complaints.length)$('complaintList').append(node('p','Жалоб пока нет.'));
+}
+
+function qualityCard(q){
+ const n=node('section');
+ n.append(node('strong','Диагностика подбора · '+q.algorithm),node('p','Средняя разница оценки: '+q.average_gap+' · Вторых ролей: '+q.secondary_count+' · Повторных пар: '+q.repeated_pairs),node('p','Разница неопределённости: '+q.uncertainty_gap+' · Целевая функция: '+q.score+' · Ожидание: '+q.oldest_wait_seconds+' с'),node('p','Разница по ролям: '+Object.entries(q.role_gaps).map(([r,v])=>(roles[r]||r)+': '+v).join(' · ')));
+ return n
+}
+function renderQualityHistory(){
+ const el=$('qualityHistory');
+ el.replaceChildren(...qualityHistory.map(m=>{
+   const a=node('article',undefined,'match');
+   a.append(node('strong',m.region+' · '+new Date(m.created_at*1000).toLocaleString()),node('p',m.id+' · '+m.status+(m.winner?' · Результат: '+m.winner:'')),qualityCard(m.quality));
+   return a
+ }));
+ if(!qualityHistory.length)el.append(node('p','Нет новых матчей с диагностикой.'));
 }

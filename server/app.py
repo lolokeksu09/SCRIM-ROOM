@@ -24,7 +24,8 @@ from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from server.matchmaking import ROLES, arrange
+from server.matchmaking import ROLES, arrange, balance_metrics
+from server.match_intelligence import enrich_candidates, save_quality, load_quality
 from server.ocr import recognize_stats, OcrUnavailable
 
 RANK_VALUES = {'BELOW_MASTER': 0, 'MASTER': 1, 'GRANDMASTER': 2, 'CHALLENGER': 3, 'SOVEREIGN': 4}
@@ -150,6 +151,10 @@ class Database:
                   side TEXT NOT NULL, role TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0,
                   PRIMARY KEY(match_id,account_id), UNIQUE(match_id,side,role)
                 );
+                CREATE INDEX IF NOT EXISTS match_players_account ON match_players(account_id,match_id);
+                CREATE TABLE IF NOT EXISTS match_quality(
+                  match_id TEXT PRIMARY KEY REFERENCES matches(id), snapshot TEXT NOT NULL
+                );
                 CREATE INDEX IF NOT EXISTS evidence_hash_lookup ON evidence(sha256);
                 CREATE TABLE IF NOT EXISTS discipline_events(
                   account_id TEXT NOT NULL REFERENCES accounts(id), match_id TEXT NOT NULL REFERENCES matches(id),
@@ -263,6 +268,7 @@ def _match_info(db, match_id, viewer_id=None, moderator=False):
         'session_id': (lambda r:r['session_id'] if r else None)(db.execute('SELECT session_id FROM match_sessions WHERE match_id=?',(match_id,)).fetchone()),
         'is_captain': captain, 'own_report': own_report, 'report_count': len(reports),
         **extra,
+        'quality': load_quality(db,match_id,full=moderator) if own is not None or moderator else None,
         'reports': {r['side']:r['winner'] for r in reports} if moderator else {},
         'result': dict(result) if result else None,
         'ready_count': sum(x['ready'] for x in players),
@@ -359,25 +365,31 @@ def _try_match(db, region, session_id=None):
     # Choose earliest feasible ten within the first twelve to reduce role starvation.
     waiters = db.execute('''
       SELECT a.id,a.riot_id,a.region,a.primary_role AS "primary",
-      a.secondary_role AS secondary,a.rating
+      a.secondary_role AS secondary,a.rating,q.joined_at
       FROM queue q JOIN accounts a ON a.id=q.account_id LEFT JOIN queue_sessions qs ON qs.account_id=q.account_id
       WHERE q.region=? AND a.status='APPROVED' AND qs.session_id IS ?
       ORDER BY q.joined_at,q.rowid LIMIT 12
     ''', (region,session_id)).fetchall()
     if len(waiters) < 10:
         return
+    candidates, repeats = enrich_candidates(db,[dict(w) for w in waiters],now_ts())
     arranged = None
-    for indexes in combinations(range(len(waiters)), 10):
-        arranged = arrange([dict(waiters[i]) for i in indexes])
+    selected_wait = 0
+    for indexes in combinations(range(len(candidates)), 10):
+        selected = [candidates[i] for i in indexes]
+        selected_wait = max(0,now_ts()-min(w['joined_at'] for w in selected))
+        arranged = arrange(selected, repeat_pairs=repeats, wait_seconds=selected_wait)
         if arranged is not None:
             break
     if arranged is None:
         return
     blue, red, _ = arranged
+    quality=balance_metrics(blue,red,repeats,selected_wait)
     mid = uuid.uuid4().hex
     deadline = now_ts()+180
     db.execute('INSERT INTO matches VALUES(?,?,?,?,?)', (mid,region,'READY_CHECK',now_ts(),deadline))
     if session_id: db.execute('INSERT INTO match_sessions VALUES(?,?)',(mid,session_id))
+    save_quality(db,mid,quality)
     for side, team in [('BLUE',blue),('RED',red)]:
         for p, role in team:
             db.execute('INSERT INTO match_players(match_id,account_id,side,role) VALUES(?,?,?,?)', (mid,p['id'],side,role))
@@ -406,7 +418,7 @@ def create_app(db_path: str, admin_key: str | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.7.0', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.8.0', docs_url=None, redoc_url=None)
 
     def limit(scope, identity, maximum, period):
         stamp=now_ts()
@@ -755,6 +767,15 @@ def create_app(db_path: str, admin_key: str | None = None):
                 raise HTTPException(409,'Матч не находится на проверке')
             _finish_result(db,match_id,payload.winner,'MODERATOR')
             return _match_info(db,match_id,moderator=True)
+
+    @app.get('/v1/admin/match-quality',dependencies=[Depends(admin_auth)])
+    def admin_quality():
+        with store.transaction() as db:
+            rows=db.execute("""SELECT m.id,m.status,m.created_at,m.region,r.winner
+              FROM match_quality q JOIN matches m ON m.id=q.match_id
+              LEFT JOIN match_results r ON r.match_id=m.id
+              ORDER BY m.created_at DESC,m.rowid DESC LIMIT 50""").fetchall()
+            return {'matches':[dict(row,quality=load_quality(db,row['id'],full=True)) for row in rows]}
 
     @app.get('/v1/admin/accounts', dependencies=[Depends(admin_auth)])
     def admin_accounts():
