@@ -403,7 +403,7 @@ def create_app(db_path: str, admin_key: str | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.5.0', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.6.0', docs_url=None, redoc_url=None)
 
     def limit(scope, identity, maximum, period):
         stamp=now_ts()
@@ -807,6 +807,8 @@ def create_app(db_path: str, admin_key: str | None = None):
             _finish_result(db,match_id,'VOID','MODERATOR')
             return {'status':'CLOSED'}
 
+    from server.community import install_community
+    install_community(app, store, token_header, admin_auth, limit, get_user, now_ts, session_status)
     return app
 
 
