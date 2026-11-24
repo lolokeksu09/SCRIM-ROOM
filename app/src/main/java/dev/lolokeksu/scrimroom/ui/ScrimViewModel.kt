@@ -203,7 +203,9 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
     fun refreshQueue(background: Boolean = false) = onlineAction(background) {
         val token = store.readServerToken()
         if (token.isBlank()) return@onlineAction
-        val queue = RemoteClient(store.readServerUrl()).state(token).toOnlineQueueState()
+        val url=store.readServerUrl()
+        val queue = RemoteClient(url).state(token).toOnlineQueueState()
+        QueueWatchService.publishForegroundState(url,token,queue)
         _state.update { it.copy(onlineQueue = queue, onlineStatus = queue.accountStatus.takeIf(String::isNotBlank) ?: it.onlineStatus) }
     }
 

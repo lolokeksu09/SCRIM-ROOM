@@ -9,6 +9,8 @@ import android.content.Context
 import android.content.Intent
 import android.os.IBinder
 import dev.lolokeksu.scrimroom.data.LocalStore
+import dev.lolokeksu.scrimroom.data.OnlineQueueState
+import android.os.SystemClock
 import dev.lolokeksu.scrimroom.data.RemoteClient
 import dev.lolokeksu.scrimroom.data.RemoteException
 import dev.lolokeksu.scrimroom.data.toOnlineQueueState
@@ -21,6 +23,14 @@ class QueueWatchService: Service() {
     companion object {
         private val active=MutableStateFlow(false)
         val running=active.asStateFlow()
+        private data class Observation(val url:String,val token:String,val state:OnlineQueueState,val at:Long)
+        @Volatile private var observation:Observation?=null
+        internal fun publishForegroundState(url:String,token:String,state:OnlineQueueState){
+            if(active.value) observation=Observation(url,token,state,SystemClock.elapsedRealtime())
+        }
+        private fun recentState(url:String,token:String):OnlineQueueState?=observation?.takeIf {
+            it.url==url && it.token==token && SystemClock.elapsedRealtime()-it.at in 0L..10000L
+        }?.state
         fun start(context:Context) {
             context.startForegroundService(Intent(context,QueueWatchService::class.java))
         }
@@ -54,7 +64,7 @@ class QueueWatchService: Service() {
             try {
                 while(isActive && token.isNotBlank() && store.readServerUrl()==url && store.readServerToken()==token){
                     try {
-                        val state=RemoteClient(url).state(token).toOnlineQueueState()
+                        val state=recentState(url,token) ?: RemoteClient(url).state(token).toOnlineQueueState()
                         errors=0
                         val match=state.match
                         if(match?.status=="READY_CHECK" && !match.ownReady){
@@ -78,5 +88,5 @@ class QueueWatchService: Service() {
         return START_NOT_STICKY
     }
     override fun onTimeout(startId:Int,fServiceType:Int){stopSelf()}
-    override fun onDestroy(){scope.cancel();active.value=false;nm.cancel(702);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy()}
+    override fun onDestroy(){scope.cancel();active.value=false;observation=null;nm.cancel(702);stopForeground(STOP_FOREGROUND_REMOVE);super.onDestroy()}
 }
