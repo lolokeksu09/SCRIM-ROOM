@@ -135,9 +135,9 @@ internal fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boole
                 SecondaryAction("Выбрать скриншот результата",enabled=!busy) { resultPicker.launch(arrayOf("image/png","image/jpeg","image/webp")) }
                 proofUri?.let { uri ->
                     AlertDialog(onDismissRequest={proofUri=null},title={Text("Отправить скриншот?")},
-                        text={Text("Изображение будет доступно модератору. После отправки его нельзя заменить. Проверь, что на снимке нет личных данных.")},
+                        text={Column(verticalArrangement=Arrangement.spacedBy(8.dp)){ DocumentPreview(uri); Text("Снимок доступен модератору. После отправки его нельзя заменить. Проверь отсутствие личных данных.") }},
                         confirmButton={TextButton(onClick={proofUri=null;vm.uploadResultEvidence(match.id,uri)},enabled=!busy){Text("Отправить")}},
-                        dismissButton={TextButton(onClick={proofUri=null}){Text("Отмена")}})
+                        dismissButton={TextButton(onClick={proofUri=null}){Text("Отмена")}},properties=androidx.compose.ui.window.DialogProperties(securePolicy=androidx.compose.ui.window.SecureFlagPolicy.SecureOn))
                 }
             }
         }

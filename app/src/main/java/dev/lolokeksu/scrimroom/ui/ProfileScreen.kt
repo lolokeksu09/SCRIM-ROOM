@@ -83,6 +83,7 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
     var documents by rememberSaveable(profile.screenshots) { mutableStateOf(profile.screenshots) }
     var serverAddress by rememberSaveable(state.serverUrl) { mutableStateOf(state.serverUrl) }
     var allowUpload by rememberSaveable { mutableStateOf(false) }
+    var preview by remember { mutableStateOf<android.net.Uri?>(null) }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         if (uris.isNotEmpty()) documents = (documents + vm.persistDocumentUris(uris)).distinct().take(4)
     }
@@ -149,8 +150,13 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
             Text("Выбрано файлов: ${documents.size}", color = Accent, fontWeight = FontWeight.Bold)
             SecondaryAction("Выбрать изображения") { launcher.launch(arrayOf("image/*")) }
             if (documents.isNotEmpty()) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    StatusPill("Документы только на устройстве", active = true)
+                Text("Документы на устройстве",color=Muted,fontSize=12.sp)
+                documents.forEachIndexed { index,raw ->
+                    Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
+                        Text("Скриншот ${index+1}",modifier=Modifier.weight(1f),fontSize=13.sp)
+                        TextButton(onClick={preview=android.net.Uri.parse(raw)}){Text("Посмотреть")}
+                        TextButton(onClick={documents=documents.filterIndexed { i,_ -> i!=index }}){Text("Убрать")}
+                    }
                 }
                 SecondaryAction("Очистить список изображений") { documents = emptyList() }
             }
@@ -204,5 +210,8 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
             Text("Нажатие отправит документы на настроенный сервер. Не отправляй личные данные, не относящиеся к игре. Возврат или обновление анкеты может потребовать повторной модерации.",
                 color = Muted, fontSize = 11.sp, lineHeight = 17.sp)
         }
+    }
+    preview?.let { uri ->
+        AlertDialog(onDismissRequest={preview=null},title={Text("Предпросмотр документа")},text={DocumentPreview(uri)},confirmButton={TextButton(onClick={preview=null}){Text("Закрыть")}},properties=androidx.compose.ui.window.DialogProperties(securePolicy=androidx.compose.ui.window.SecureFlagPolicy.SecureOn))
     }
 }

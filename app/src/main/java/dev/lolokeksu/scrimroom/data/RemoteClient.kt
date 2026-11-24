@@ -95,7 +95,9 @@ class RemoteClient(baseInput: String) {
         return (0 until rows.length()).map { i ->
             val row = rows.getJSONObject(i)
             OnlineResult(row.getString("match_id"), row.getString("winner"), row.getString("side"),
-                row.getLong("resolved_at"), row.optString("role"))
+                row.getLong("resolved_at"), row.optString("role"),
+                row.takeUnless { it.isNull("before_rating") }?.optInt("before_rating"),
+                row.takeUnless { it.isNull("after_rating") }?.optInt("after_rating"))
         }
     }
 
@@ -251,7 +253,7 @@ data class OnlineMatch(
 )
 data class MatchQuality(val averageGap: Double,val secondaryCount: Int,val repeatedPairs: Int)
 
-data class OnlineResult(val id: String, val winner: String, val side: String, val resolvedAt: Long, val role: String = "")
+data class OnlineResult(val id: String, val winner: String, val side: String, val resolvedAt: Long, val role: String = "",val beforeRating:Int?=null,val afterRating:Int?=null)
 data class RoleStats(val role: String,val played: Int,val wins: Int,val losses: Int,val estimate: Int? = null,val sample: Int? = null,val uncertainty: Int? = null)
 data class PersonalStats(val played: Int,val wins: Int,val losses: Int,val voids: Int,val winRate: Double?,val calibrated: Int,val target: Int,val roles: List<RoleStats>)
 

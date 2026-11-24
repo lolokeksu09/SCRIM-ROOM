@@ -77,7 +77,7 @@ fun HistoryScreen(results: List<DemoResult>, state: ScrimUiState, vm: ScrimViewM
     LaunchedEffect(state.hasOnlineAccount) { if (state.hasOnlineAccount) vm.loadOnlineResults() }
     Page {
         if (state.hasOnlineAccount) {
-            Eyebrow("Личная статистика клуба")
+            Headline("Статистика клуба","Только подтверждённые результаты SCRIM ROOM")
             state.personalStats?.let { stats ->
                 PanelCard {
                     Row(modifier=Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
@@ -88,15 +88,18 @@ fun HistoryScreen(results: List<DemoResult>, state: ScrimUiState, vm: ScrimViewM
                     Text("Поражения: ${stats.losses} · Аннулировано: ${stats.voids}",color=Muted,fontSize=12.sp)
                     Text("Калибровка: ${stats.calibrated}/${stats.target} подтверждённых игр",fontWeight=FontWeight.Bold)
                     Text(if(stats.calibrated<stats.target) "Предварительная оценка; выборка пока мала." else "Начальная выборка собрана. Оценка не является Riot MMR.",color=Muted,fontSize=12.sp)
+                    if(stats.played>0) WinLossStrip(stats.wins,stats.losses)
                     HorizontalDivider(color=Outline)
                     Eyebrow("По фактическим ролям")
                     Text("Оценки основаны на последних 30 подтверждённых играх; неопределённость — показатель размера выборки, не доверительный интервал.",color=Muted,fontSize=12.sp)
                     stats.roles.forEach { role ->
                         Text("${Role.entries.firstOrNull { it.name==role.role }?.title ?: role.role}: ${role.played} игр · ${role.wins} побед · ${role.losses} поражений",fontSize=13.sp)
+                        if(role.played>0) WinLossStrip(role.wins,role.losses)
                         if(role.estimate!=null) Text("Оценка для подбора: ${role.estimate} · Выборка: ${role.sample ?: 0} · Неопределённость: ${role.uncertainty ?: 0}",color=Muted,fontSize=11.sp)
                     }
                 }
             }
+            state.onlineResults?.let { RatingHistoryChart(it) }
             Eyebrow("Подтверждённые матчи")
             PanelCard {
                 SecondaryAction("Обновить результаты", enabled = !state.onlineBusy) { vm.loadOnlineResults() }
@@ -106,6 +109,7 @@ fun HistoryScreen(results: List<DemoResult>, state: ScrimUiState, vm: ScrimViewM
                 else online.forEach { result ->
                     Text(when { result.winner == "VOID" -> "Аннулирован"; result.winner == result.side -> "Победа"; else -> "Поражение" }, fontWeight = FontWeight.Bold)
                     Text(SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("ru")).format(Date(result.resolvedAt * 1000)), color = Muted, fontSize = 12.sp)
+                    if(result.beforeRating!=null && result.afterRating!=null) { val delta=result.afterRating-result.beforeRating; Text("Elo: ${result.afterRating} (${if(delta>0) "+" else ""}$delta)",color=if(delta>=0) Accent else Red,fontSize=13.sp) }
                     if(result.role.isNotBlank()) Text("Роль: " + (Role.entries.firstOrNull { it.name==result.role }?.title ?: result.role),color=Muted,fontSize=12.sp)
                     HorizontalDivider(color = Outline)
                 }

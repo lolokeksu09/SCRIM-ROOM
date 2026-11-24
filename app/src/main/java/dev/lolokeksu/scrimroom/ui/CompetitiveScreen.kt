@@ -130,11 +130,11 @@ fun CompetitiveScreen(state: ScrimUiState,vm: ScrimViewModel) {
                     }
                     Eyebrow("Команды региона")
                     data.teams.forEach { team ->
-                        PanelCard {
-                            Text(team.name,fontWeight=FontWeight.Bold)
-                            Text("${team.played} встреч · ${team.wins} побед",color=Muted)
-                            StatusPill(if(team.eligible) "Полный состав" else "Набор игроков",active=team.eligible)
+                        Row(Modifier.fillMaxWidth().padding(vertical=6.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                            Column(Modifier.weight(1f)){Text(team.name,fontWeight=FontWeight.Bold);Text("${team.played} встреч · ${team.wins} побед",color=Muted,fontSize=12.sp)}
+                            Text(if(team.eligible) "Готова" else "Набор",color=if(team.eligible) Accent else Muted,fontSize=12.sp)
                         }
+                        HorizontalDivider(color=Outline)
                     }
                 }
                 if(section=="Встречи"){
@@ -188,12 +188,7 @@ fun CompetitiveScreen(state: ScrimUiState,vm: ScrimViewModel) {
                         PanelCard {
                             Text(cup.name,fontSize=20.sp,fontWeight=FontWeight.Bold)
                             Text(clubStatus(cup.status),color=Accent)
-                            data.fixtures.filter{it.cupId==cup.id}.sortedBy{when(it.stage){"SEMIFINAL_1"->0;"SEMIFINAL_2"->1;else->2}}.forEach { f ->
-                                Eyebrow(if(f.stage=="FINAL") "Финал" else if(f.stage=="SEMIFINAL_1") "Полуфинал 1" else "Полуфинал 2")
-                                Text("${f.aName} — ${f.bName}",fontWeight=FontWeight.Bold)
-                                Text(formatter.format(Date(f.starts*1000))+" · "+clubStatus(f.status),color=Muted,fontSize=12.sp)
-                                f.winner?.let{Text("Победитель: "+if(it==f.a) f.aName else f.bName,color=Accent)}
-                            }
+                            CupBracket(data.fixtures.filter { it.cupId==cup.id },cup.status)
                             cup.winner?.let { winner -> Text("Чемпион: "+(data.teams.firstOrNull{it.id==winner}?.name ?: data.fixtures.firstOrNull{it.cupId==cup.id && it.stage=="FINAL"}?.let{if(it.a==winner)it.aName else it.bName} ?: "Команда"),fontWeight=FontWeight.Bold,color=Accent) }
                         }
                     }
@@ -206,6 +201,6 @@ fun CompetitiveScreen(state: ScrimUiState,vm: ScrimViewModel) {
     }
 }
 
-private fun clubStatus(status:String)=when(status){
+internal fun clubStatus(status:String)=when(status){
     "PENDING"->"Ожидает капитана";"SCHEDULED"->"Запланирована";"FINISHED"->"Завершено";"RUNNING"->"Турнир идёт";"EXPIRED"->"Время истекло";"CANCELLED"->"Отменено";else->status
 }
