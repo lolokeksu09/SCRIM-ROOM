@@ -16,7 +16,7 @@ This is an invited-club release candidate, not a public launch.
 | Client | RC onboarding/navigation; debug signing is not release signing | Emulator CI, physical device, verified release certificate |
 | Hosting | Local-only compose port | Dedicated hostname, HTTPS, external smoke; no production service yet |
 
-Known limits: no Riot account ownership verification or official telemetry; no automatic lobby creation; active queue may retain disconnected players until they leave or a ready check expires; single SQLite worker; shared moderator key; no formal privacy/legal review. Long lists remain bounded by API where applicable, not a measured performance optimization.
+Known limits: no Riot account ownership verification or official telemetry; no automatic lobby creation; waiting entries expire after 90 seconds without authenticated queue activity; assigned matches still follow their own lifecycle; single SQLite worker; shared moderator key; no formal privacy/legal review. Long lists remain bounded by API where applicable, not a measured performance optimization.
 
 ## Release APK
 

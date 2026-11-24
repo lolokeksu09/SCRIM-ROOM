@@ -416,6 +416,7 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                         info?.queued == true -> {
                             Text(if (info.sessionId != null) "Поиск в игровой сессии" else "Поиск запущен", fontSize = 18.sp, fontWeight = FontWeight.Bold)
                             Text("Игроков в текущей очереди: ${info.waiting}", color = Muted, fontSize = 13.sp)
+                            Text("Без связи с сервером поиск прекращается через 90 секунд. Для свёрнутого приложения включи наблюдение в настройках.",color=Muted,fontSize=12.sp)
                             SecondaryAction("Покинуть очередь", enabled = !state.onlineBusy) { vm.leaveOnlineQueue() }
                         }
                         else -> {

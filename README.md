@@ -147,3 +147,5 @@ Run inside the server container as the service owner: `python -m server.backup /
 
 ## 1.0.0-rc.1
 Three first-run intro pages, state-based home, grouped navigation, replayable introduction, back navigation and improved text scaling on action buttons. Concurrent user requests now report a busy state instead of silently dropping actions. Docker readiness and resource restrictions are configured. Manual release workflow requires an existing trusted release key and its independently recorded certificate fingerprint; debug artifacts are not release builds. See [release gate and deployment runbook](docs/RELEASE-RC.md). Not yet a production deployment.
+
+Queue presence: an idle waiting entry expires after 90 seconds without authenticated queue state/join traffic; no disciplinary penalty and no automatic rejoin. Existing pre-RC queue entries use their original joined_at until touched. Assigned matches are not cancelled by this lease. Cleanup is lazy on queue/session operations.

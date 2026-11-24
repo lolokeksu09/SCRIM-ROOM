@@ -33,6 +33,7 @@ RANK_SEEDS = {'GRANDMASTER': 1600, 'CHALLENGER': 1800, 'SOVEREIGN': 2000}
 MAX_IMAGE_BYTES = 4 * 1024 * 1024
 MAX_EVIDENCE = 4
 MAX_PIXELS = 16_000_000
+QUEUE_IDLE_SECONDS = 90
 
 
 def now_ts() -> int:
@@ -140,6 +141,11 @@ class Database:
                   account_id TEXT PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
                   region TEXT NOT NULL, joined_at INTEGER NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS queue_presence(
+                  account_id TEXT PRIMARY KEY REFERENCES queue(account_id) ON DELETE CASCADE,
+                  last_seen INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS queue_presence_time ON queue_presence(last_seen);
                 CREATE INDEX IF NOT EXISTS queue_region_time ON queue(region,joined_at);
                 CREATE TABLE IF NOT EXISTS matches(
                   id TEXT PRIMARY KEY, region TEXT NOT NULL,
@@ -324,7 +330,17 @@ def session_info(db,row,viewer=None):
         waiting=db.execute('SELECT count(*) FROM queue_sessions WHERE session_id=?',(sid,)).fetchone()[0])
 
 
+def touch_queue(db, ident):
+    db.execute('''INSERT INTO queue_presence(account_id,last_seen)
+      SELECT account_id,? FROM queue WHERE account_id=?
+      ON CONFLICT(account_id) DO UPDATE SET last_seen=excluded.last_seen''',(now_ts(),ident))
+
+
 def clean_session_queues(db):
+    # Existing pre-RC queue records fall back to joined_at. Expiration never penalizes a player.
+    db.execute('''DELETE FROM queue WHERE account_id IN (
+       SELECT q.account_id FROM queue q LEFT JOIN queue_presence p ON p.account_id=q.account_id
+       WHERE coalesce(p.last_seen,q.joined_at)<=?)''',(now_ts()-QUEUE_IDLE_SECONDS,))
     db.execute("""DELETE FROM queue WHERE account_id IN (
        SELECT q.account_id FROM queue_sessions q JOIN sessions s ON s.id=q.session_id
        WHERE s.cancelled=1 OR s.ends_at<=?)""",(now_ts(),))
@@ -341,8 +357,9 @@ def requeue_match_player(db,mid,player):
         sid=None
     if discipline(db,player['id'])['blocked_until']: return
     inserted=db.execute('INSERT OR IGNORE INTO queue(account_id,region,joined_at) VALUES(?,?,?)',(player['id'],player['region'],now_ts())).rowcount
-    if inserted and sid:
-        db.execute('INSERT INTO queue_sessions VALUES(?,?)',(player['id'],sid))
+    if inserted:
+        touch_queue(db,player['id'])
+        if sid: db.execute('INSERT INTO queue_sessions VALUES(?,?)',(player['id'],sid))
 
 
 def _expire_ready_checks(db):
@@ -647,6 +664,7 @@ def create_app(db_path: str, admin_key: str | None = None):
             clean_session_queues(db)
             match_id=_active_match_id(db,user['id'])
             queued=db.execute('SELECT 1 FROM queue WHERE account_id=?',(user['id'],)).fetchone() is not None
+            if queued: touch_queue(db,user['id'])
             scope=db.execute('SELECT session_id FROM queue_sessions WHERE account_id=?',(user['id'],)).fetchone()
             sid=scope['session_id'] if scope else None
             count=db.execute('SELECT count(*) FROM queue q LEFT JOIN queue_sessions qs ON q.account_id=qs.account_id WHERE q.region=? AND qs.session_id IS ?',(user['region'],sid)).fetchone()[0]
@@ -682,6 +700,7 @@ def create_app(db_path: str, admin_key: str | None = None):
                     raise HTTPException(403,'Сначала запишись на сессию')
             db.execute('INSERT OR IGNORE INTO queue(account_id,region,joined_at) VALUES(?,?,?)',(user['id'],user['region'],now_ts()))
             if session_id: db.execute('INSERT OR IGNORE INTO queue_sessions VALUES(?,?)',(user['id'],session_id))
+            touch_queue(db,user['id'])
             _try_match(db,user['region'],session_id)
             match_id=_active_match_id(db,user['id'])
             return {'queued':match_id is None,'match':_match_info(db,match_id,viewer_id=user['id']) if match_id else None}
