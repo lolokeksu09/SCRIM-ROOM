@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from server.matchmaking import ROLES, arrange
+from server.ocr import recognize_stats, OcrUnavailable
 
 RANK_VALUES = {'BELOW_MASTER': 0, 'MASTER': 1, 'GRANDMASTER': 2, 'CHALLENGER': 3, 'SOVEREIGN': 4}
 RANK_SEEDS = {'GRANDMASTER': 1600, 'CHALLENGER': 1800, 'SOVEREIGN': 2000}
@@ -134,6 +135,17 @@ class Database:
                   side TEXT NOT NULL, role TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0,
                   PRIMARY KEY(match_id,account_id), UNIQUE(match_id,side,role)
                 );
+                CREATE INDEX IF NOT EXISTS evidence_hash_lookup ON evidence(sha256);
+                CREATE TABLE IF NOT EXISTS discipline_events(
+                  account_id TEXT NOT NULL REFERENCES accounts(id), match_id TEXT NOT NULL REFERENCES matches(id),
+                  reason TEXT NOT NULL, created_at INTEGER NOT NULL, blocked_until INTEGER NOT NULL,
+                  PRIMARY KEY(account_id,match_id)
+                );
+                CREATE INDEX IF NOT EXISTS discipline_account ON discipline_events(account_id,blocked_until);
+                CREATE TABLE IF NOT EXISTS request_limits(
+                  scope TEXT NOT NULL, identity TEXT NOT NULL, window_start INTEGER NOT NULL,
+                  count INTEGER NOT NULL, PRIMARY KEY(scope,identity,window_start)
+                );
                 CREATE TABLE IF NOT EXISTS match_reports(
                   match_id TEXT NOT NULL REFERENCES matches(id), side TEXT NOT NULL,
                   winner TEXT NOT NULL, reported_at INTEGER NOT NULL,
@@ -153,6 +165,24 @@ class Database:
             # Commit is harmless when the transaction remains open; otherwise skip it.
 
 
+def discipline(db, account_id):
+    row=db.execute('SELECT count(*) AS n,coalesce(max(blocked_until),0) AS until FROM discipline_events WHERE account_id=?',(account_id,)).fetchone()
+    return {'incidents':row['n'],'blocked_until':row['until'] if row['until']>now_ts() else 0}
+
+
+def add_incident(db, account_id, match_id, reason):
+    duration = 60 if reason=='DECLINED' else 120
+    stamp=now_ts()
+    db.execute('INSERT OR IGNORE INTO discipline_events VALUES(?,?,?,?,?)',(account_id,match_id,reason,stamp,stamp+duration))
+
+
+def duplicate_slots(db, account_id):
+    rows=db.execute('''SELECT DISTINCT e.slot FROM evidence e WHERE e.account_id=?
+        AND EXISTS(SELECT 1 FROM evidence x WHERE x.sha256=e.sha256 AND x.account_id!=e.account_id)
+        ORDER BY e.slot''',(account_id,)).fetchall()
+    return [r['slot'] for r in rows]
+
+
 def account_dict(db, row):
     count = db.execute('SELECT count(*) FROM evidence WHERE account_id=?', (row['id'],)).fetchone()[0]
     return {
@@ -160,7 +190,7 @@ def account_dict(db, row):
         'current_rank': row['current_rank'], 'previous_rank': row['previous_rank'],
         'primary': row['primary_role'], 'secondary': row['secondary_role'],
         'status': row['status'], 'rating_seed': row['rating'],
-        'evidence_count': count,
+        'evidence_count': count, 'discipline': discipline(db,row['id']),
     }
 
 
@@ -240,6 +270,8 @@ def _expire_ready_checks(db):
     for item in expired:
         mid = item['id']
         db.execute("UPDATE matches SET status='CANCELLED' WHERE id=?", (mid,))
+        for missing in db.execute('SELECT account_id FROM match_players WHERE match_id=? AND ready=0',(mid,)).fetchall():
+            add_incident(db,missing['account_id'],mid,'NO_READY')
         # Requeue only players who pressed Ready before deadline.
         players = db.execute('''
           SELECT a.id,a.region FROM match_players mp JOIN accounts a ON a.id=mp.account_id
@@ -299,7 +331,18 @@ def create_app(db_path: str, admin_key: str | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.2.0', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.4.0', docs_url=None, redoc_url=None)
+
+    def limit(scope, identity, maximum, period):
+        stamp=now_ts()
+        start=stamp//period*period
+        digest=hashlib.sha256(identity.encode()).hexdigest()
+        with store.transaction(write=True) as db:
+            db.execute('DELETE FROM request_limits WHERE scope=? AND window_start<?',(scope,start))
+            db.execute('INSERT INTO request_limits VALUES(?,?,?,1) ON CONFLICT(scope,identity,window_start) DO UPDATE SET count=count+1',(scope,digest,start))
+            count=db.execute('SELECT count FROM request_limits WHERE scope=? AND identity=? AND window_start=?',(scope,digest,start)).fetchone()[0]
+        if count>maximum:
+            raise HTTPException(429,'Слишком много запросов. Попробуй позже.',headers={'Retry-After':str(start+period-stamp)})
 
     def token_header(authorization: str | None = Header(default=None)):
         if not authorization or not authorization.startswith('Bearer '):
@@ -340,7 +383,8 @@ def create_app(db_path: str, admin_key: str | None = None):
         return {'status':'ok'}
 
     @app.post('/v1/accounts', status_code=201)
-    def create_account(payload: ProfileIn):
+    def create_account(payload: ProfileIn, request: Request):
+        limit('registration',request.client.host if request.client else 'unknown',30,3600)
         token = secrets.token_urlsafe(32)
         ident = uuid.uuid4().hex
         high_rank = max((payload.current_rank,payload.previous_rank), key=lambda v:RANK_VALUES[v])
@@ -385,6 +429,10 @@ def create_app(db_path: str, admin_key: str | None = None):
 
     @app.post('/v1/me/evidence')
     async def submit_evidence(image: UploadFile=File(...),token=Depends(token_header)):
+        with store.transaction() as db:
+            user=get_user(db,token)
+            ident=user['id']
+        limit('evidence',ident,20,3600)
         content=await image.read(MAX_IMAGE_BYTES+1)
         safe=_read_safe_image(content)
         hashed=hashlib.sha256(safe).hexdigest()
@@ -402,6 +450,28 @@ def create_app(db_path: str, admin_key: str | None = None):
             db.execute('INSERT INTO evidence VALUES(?,?,?,?)',(user['id'],slot,safe,hashed))
             return {'slot':slot,'evidence_count':len(slots)+1,'status':'PENDING_REVIEW'}
 
+    @app.post('/v1/me/evidence/{slot}/ocr')
+    def own_ocr(slot:int,token=Depends(token_header)):
+        with store.transaction() as db:
+            ident=get_user(db,token)['id']
+        limit('ocr',ident,12,3600)
+        return read_ocr(ident,slot)
+
+    def read_ocr(ident,slot):
+        with store.transaction() as db:
+            row=db.execute('SELECT content FROM evidence WHERE account_id=? AND slot=?',(ident,slot)).fetchone()
+        if row is None:
+            raise HTTPException(404,'Документ не найден')
+        try:
+            return recognize_stats(row['content'])
+        except OcrUnavailable:
+            raise HTTPException(503,'OCR временно недоступен')
+
+    @app.post('/v1/admin/accounts/{account_id}/evidence/{slot}/ocr',dependencies=[Depends(admin_auth)])
+    def admin_ocr(account_id:str,slot:int):
+        limit('admin_ocr','moderator',60,3600)
+        return read_ocr(account_id,slot)
+
     @app.get('/v1/queue/state')
     def queue_state(token=Depends(token_header)):
         with store.transaction(write=True) as db:
@@ -411,13 +481,21 @@ def create_app(db_path: str, admin_key: str | None = None):
             queued=db.execute('SELECT 1 FROM queue WHERE account_id=?',(user['id'],)).fetchone() is not None
             count=db.execute('SELECT count(*) FROM queue WHERE region=?',(user['region'],)).fetchone()[0]
             return {'account_status':user['status'],'queued':queued,'waiting_in_region':count,
-                    'match':_match_info(db,match_id,viewer_id=user['id']) if match_id else None}
+                    'discipline':discipline(db,user['id']), 'match':_match_info(db,match_id,viewer_id=user['id']) if match_id else None}
 
     @app.post('/v1/queue/join')
     def join_queue(token=Depends(token_header)):
+        with store.transaction() as db:
+            ident=get_user(db,token)['id']
+        limit('queue_join',ident,30,60)
+        # Commit expiration before enforcing cooldown; an HTTP error must not roll it back.
+        with store.transaction(write=True) as db:
+            _expire_ready_checks(db)
         with store.transaction(write=True) as db:
             user=get_user(db,token)
-            _expire_ready_checks(db)
+            blocked=discipline(db,user['id'])['blocked_until']
+            if blocked:
+                raise HTTPException(429,'Временное ограничение поиска после отмены матча',headers={'Retry-After':str(max(1,blocked-now_ts()))})
             if user['status'] != 'APPROVED':
                 raise HTTPException(403, 'Требуется одобрение заявки модератором')
             if _active_match_id(db,user['id']):
@@ -459,11 +537,14 @@ def create_app(db_path: str, admin_key: str | None = None):
     @app.post('/v1/matches/{match_id}/decline')
     def decline(match_id:str,token=Depends(token_header)):
         with store.transaction(write=True) as db:
+            _expire_ready_checks(db)
+        with store.transaction(write=True) as db:
             user,_=match_member(db,token,match_id)
             match=db.execute('SELECT * FROM matches WHERE id=?',(match_id,)).fetchone()
             if match['status']!='READY_CHECK':
                 raise HTTPException(409,'Отказ доступен только при проверке готовности')
             db.execute("UPDATE matches SET status='CANCELLED' WHERE id=?",(match_id,))
+            add_incident(db,user['id'],match_id,'DECLINED')
             others=db.execute('''SELECT a.id,a.region FROM match_players mp
                 JOIN accounts a ON a.id=mp.account_id
                 WHERE mp.match_id=? AND a.id!=? AND a.status='APPROVED' ''',(match_id,user['id'])).fetchall()
@@ -519,7 +600,7 @@ def create_app(db_path: str, admin_key: str | None = None):
     def admin_accounts():
         with store.transaction() as db:
             rows=db.execute('SELECT * FROM accounts ORDER BY created_at DESC').fetchall()
-            return [dict(account_dict(db,row), review_revision=review_revision(db,row)) for row in rows]
+            return [dict(account_dict(db,row), review_revision=review_revision(db,row), duplicate_slots=duplicate_slots(db,row['id'])) for row in rows]
 
     @app.get('/v1/admin/matches', dependencies=[Depends(admin_auth)])
     def admin_matches():

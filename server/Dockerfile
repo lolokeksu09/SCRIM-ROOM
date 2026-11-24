@@ -1,7 +1,8 @@
 FROM python:3.12-slim
 WORKDIR /srv
 COPY server/requirements.txt /srv/server/requirements.txt
-RUN pip install --no-cache-dir -r server/requirements.txt \
+RUN apt-get update && apt-get install -y --no-install-recommends tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir -r server/requirements.txt \
     && useradd --system --user-group --uid 10001 scrim \
     && mkdir -p /data && chown scrim:scrim /data
 COPY server /srv/server
