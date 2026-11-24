@@ -120,7 +120,7 @@ fun AccountSettingsScreen(state:ScrimUiState,vm:ScrimViewModel,onProfile:()->Uni
                 Eyebrow("Центр уведомлений")
                 SecondaryAction("Обновить уведомления",enabled=!state.onlineBusy){vm.loadAccountSettings()}
                 val items=state.inbox
-                if(items==null) Text("Уведомления ещё не загружены",color=Muted)
+                if(items==null) Text(if(state.onlineBusy) "Загрузка уведомлений…" else "Уведомления ещё не загружены. Обнови список.",color=Muted)
                 else {
                     Text("Непрочитанных: ${items.count{!it.read}}",color=Accent)
                     SecondaryAction("Отметить всё прочитанным",enabled=!state.onlineBusy && items.any{!it.read}){vm.readInbox()}

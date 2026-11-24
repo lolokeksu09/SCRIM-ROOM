@@ -12,8 +12,8 @@ android {
         applicationId = "dev.lolokeksu.scrimroom"
         minSdk = 26
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.0.0-rc.5"
+        versionCode = 18
+        versionName = "1.0.0-rc.6"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
     buildTypes {

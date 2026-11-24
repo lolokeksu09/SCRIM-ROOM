@@ -1,4 +1,4 @@
-# SCRIM ROOM 1.0.0-rc.5 — release gate
+# SCRIM ROOM 1.0.0-rc.6 — release gate
 
 This is an invited-club release candidate, not a public launch.
 
@@ -48,3 +48,6 @@ Require distinct and non-reused result evidence for automatic Elo settlement on 
 Save a recovery code before upgrading Android; migrated tokens require the device's Keystore. Configure named moderator credentials off-host using independently generated high-entropy secrets, store only SHA-256 digests in SCRIM_MODERATOR_HASHES, keep the owner key private, restart to revoke. Existing moderator routes share permissions; actor attribution is best effort and legacy audit rows are retained. No production keys or accounts were created.
 
 Foreground screen refresh remains active with queue observation enabled. The service reuses matching recent foreground responses (maximum ten seconds); stale or different-account responses are not reused.
+
+## RC.6
+Compact UI and real-data visualization. Verify on API33/35, actual physical device, larger font and narrow width. UI fixture tests are not evidence of real match outcomes. No domain/deployment changes.

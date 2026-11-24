@@ -92,7 +92,7 @@ fun CompetitiveScreen(state: ScrimUiState,vm: ScrimViewModel) {
             SecondaryAction("Обновить соревнования",enabled=!state.onlineBusy){vm.loadClub()}
             ChoiceRow("Раздел",listOf("Команда","Встречи","Кубки","Сезоны"),section,{it}){section=it}
             val data=state.club
-            if(data==null) Text("Данные ещё не загружены",color=Muted)
+            if(data==null) Text(if(state.onlineBusy) "Загрузка соревнований…" else "Данные ещё не загружены. Нажми «Обновить соревнования».",color=Muted)
             else {
                 val mine=data.mine
                 if(section=="Команда"){

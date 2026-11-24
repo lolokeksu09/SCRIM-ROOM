@@ -1,4 +1,4 @@
-# SCRIM ROOM — 1.0.0-rc.5
+# SCRIM ROOM — 1.0.0-rc.6
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
@@ -161,3 +161,6 @@ Production ASGI entrypoint always requires two distinct, non-reused result scree
 
 ## RC.5 architecture and credential migration
 Nine screen/panel source files and shared UI primitives; immutable UI state and community/competition actions extracted, retaining a single session mutation coordinator. Foreground queue polling remains authoritative for the visible screen; the optional queue service can reuse a same-server, same-token observation up to ten seconds old instead of repeating the network request. AES-256-GCM token encryption using Android Keystore binds ciphertext to the configured server URL; successful migration replaces the legacy plaintext preference atomically. If the key is unavailable, recovery is required; save a recovery code before upgrade. No hardware-backed guarantee. Existing owner key remains compatible; optional `SCRIM_MODERATOR_HASHES` JSON maps unique operator names to SHA-256 digests of independent random 32-byte or longer secrets. Recreate the server to rotate/revoke named credentials. All named moderators have existing moderator permissions, not granular RBAC. Audit rows record the actor; legacy rows remain labeled `legacy`. No keys are provisioned and no server deployment performed.
+
+## RC.6 — Design & Experience
+Compact shared spacing and navigation rows, stage-aware match navigation, paired role roster and readiness indicator, expandable balance details, decline confirmation, actual recent Elo history with selectable ranges, win/loss proportions, stage-based cup bracket, per-document local preview and removal, and a cached unread count (updated on settings refresh). Demo mode is collapsed for online users. No generated statistics, new server dependency or gameplay changes. Local document preview decodes bounded sampled bitmaps; it is not OCR or an upload. API history stays limited to 50 records; the graph uses only non-void rating changes. Existing admin/competition rules unchanged.

@@ -104,7 +104,7 @@ fun HistoryScreen(results: List<DemoResult>, state: ScrimUiState, vm: ScrimViewM
             PanelCard {
                 SecondaryAction("Обновить результаты", enabled = !state.onlineBusy) { vm.loadOnlineResults() }
                 val online = state.onlineResults
-                if (online == null) Text("Результаты ещё не загружены", color = Muted, fontSize = 13.sp)
+                if (online == null) Text(if(state.onlineBusy) "Загрузка результатов…" else "Результаты ещё не загружены. Нажми «Обновить результаты».", color = Muted, fontSize = 13.sp)
                 else if (online.isEmpty()) Text("Нет подтверждённых матчей", color = Muted, fontSize = 13.sp)
                 else online.forEach { result ->
                     Text(when { result.winner == "VOID" -> "Аннулирован"; result.winner == result.side -> "Победа"; else -> "Поражение" }, fontWeight = FontWeight.Bold)
