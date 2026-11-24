@@ -108,6 +108,26 @@ class RemoteClientIntegrationTest {
             val active = checkNotNull(api.state(tokens.first()).toOnlineQueueState().match)
             assertEquals("ACTIVE", active.status)
             assertEquals(10, active.readyCount)
+
+            // Determine the captains from server-assigned positions, not registration order.
+            val captains = tokens.filter { api.state(it).toOnlineQueueState().match?.isCaptain == true }
+            assertEquals(2, captains.size)
+            val nonCaptain = tokens.first { it !in captains }
+            val deniedReport = runCatching { api.reportResult(nonCaptain, found.id, "BLUE") }.exceptionOrNull() as? RemoteException
+            assertEquals(403, deniedReport?.statusCode)
+            assertEquals("ACTIVE", api.reportResult(captains[0], found.id, "BLUE").getString("status"))
+            val waiting = checkNotNull(api.state(captains[1]).toOnlineQueueState().match)
+            assertEquals(1, waiting.reportCount)
+            assertNull(waiting.ownReport)
+            assertEquals("CLOSED", api.reportResult(captains[1], found.id, "BLUE").getString("status"))
+            assertEquals("CLOSED", api.reportResult(captains[1], found.id, "BLUE").getString("status"))
+            tokens.forEach { token ->
+                val results = api.results(token)
+                assertEquals(1, results.size)
+                assertEquals(found.id, results[0].id)
+                assertEquals("BLUE", results[0].winner)
+                assertNull(api.state(token).toOnlineQueueState().match)
+            }
         } finally {
             HttpsURLConnection.setDefaultSSLSocketFactory(original)
             images.forEach { resolver.delete(it, null, null) }
