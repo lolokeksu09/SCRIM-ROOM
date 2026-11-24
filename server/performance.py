@@ -1,6 +1,8 @@
 """Bounded process-local aggregate latency samples. No request IDs, bodies or credentials."""
 import math
 import threading
+import sys
+import resource
 from collections import deque
 
 class PerformanceWindow:
@@ -19,4 +21,5 @@ class PerformanceWindow:
             if not samples:continue
             values=sorted(t for t,_ in samples)
             groups[name]={'samples':len(values),'p50_ms':round(values[math.ceil(len(values)*.5)-1],2),'p95_ms':round(values[math.ceil(len(values)*.95)-1],2),'max_ms':round(values[-1],2),'errors':sum(e for _,e in samples)}
-        return {'capacity_per_group':self.capacity,'groups':groups}
+        peak=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        return {'capacity_per_group':self.capacity,'groups':groups,'process_peak_rss_mib':round(peak/(1024*1024 if sys.platform=='darwin' else 1024),1)}

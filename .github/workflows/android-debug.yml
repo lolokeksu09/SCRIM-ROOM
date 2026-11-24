@@ -22,7 +22,7 @@ jobs:
       - name: Install OCR engine and language packs
         run: sudo apt-get update && sudo apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-rus
       - name: API integration tests
-        run: python -m pytest -q server/tests
+        run: python -m pytest -q -rP server/tests
 
   android-debug:
     needs: api-tests
@@ -45,7 +45,7 @@ jobs:
         run: gradle :app:assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: SCRIM-ROOM-Android-1.0.0-rc.6-debug
+          name: SCRIM-ROOM-Android-1.0.0-rc.7-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14

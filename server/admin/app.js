@@ -152,7 +152,7 @@ function renderOperations(){
  if(!operations)return;
  const n=node('article');n.append(node('h2','База данных: '+operations.database));
  for(const [k,v] of Object.entries(operations.counts))n.append(node('p',k+': '+v));
- if(operations.performance){n.append(node('h2','Последние запросы (память процесса)'));for(const [group,m] of Object.entries(operations.performance.groups))n.append(node('p',group+': '+m.samples+' запросов · p95 '+m.p95_ms+' мс · 5xx '+m.errors));}
+ if(operations.performance){n.append(node('h2','Последние запросы (память процесса)'),node('p','Пиковая RSS: '+operations.performance.process_peak_rss_mib+' МиБ'));for(const [group,m] of Object.entries(operations.performance.groups))n.append(node('p',group+': '+m.samples+' запросов · p95 '+m.p95_ms+' мс · 5xx '+m.errors));}
  $('serverStatus').replaceChildren(n);
  $('auditList').replaceChildren(...operations.audit.map(a=>{
    const card=node('article',undefined,'match');

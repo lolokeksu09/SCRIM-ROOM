@@ -1,4 +1,4 @@
-# SCRIM ROOM 1.0.0-rc.6 — release gate
+# SCRIM ROOM 1.0.0-rc.7 — release gate
 
 This is an invited-club release candidate, not a public launch.
 
@@ -51,3 +51,6 @@ Foreground screen refresh remains active with queue observation enabled. The ser
 
 ## RC.6
 Compact UI and real-data visualization. Verify on API33/35, actual physical device, larger font and narrow width. UI fixture tests are not evidence of real match outcomes. No domain/deployment changes.
+
+## RC.7
+Verify exact-revision API, browser pagination, emulator and Docker CI. Synthetic load is a regression smoke, not a production SLO. Record actual measured latency, RSS and queue behavior on target VDS before opening registration. The SQLite single-worker transaction lock remains; no database migration to a different engine is performed.

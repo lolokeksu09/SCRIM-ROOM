@@ -39,6 +39,9 @@ def arrange(players,repeat_pairs=None,wait_seconds=0):
     best=None
     def finish():
         nonlocal best
+        # Reject role pairs before enumerating orientations: orientation cannot change gaps.
+        def strength(p,r):return p.get('role_strength',{}).get(r,p['rating'])
+        if any(abs(strength(allocations[r][0],r)-strength(allocations[r][1],r))>MAX_ROLE_GAP for r in ROLES):return
         # A team and its mirror have identical objectives. Consider one of each pair,
         # then orient deterministically using recent side history as a final tie-break.
         for bits in product((0,1),repeat=4):
@@ -47,6 +50,8 @@ def arrange(players,repeat_pairs=None,wait_seconds=0):
                 a,b=allocations[role]
                 blue.append((a,role) if bit==0 else (b,role))
                 red.append((b,role) if bit==0 else (a,role))
+            gap=round(abs(sum(strength(p,r) for p,r in blue)-sum(strength(p,r) for p,r in red))/5,1)
+            if gap>MAX_AVERAGE_GAP:continue
             def side_cost(b,r):
                 return sum(p.get('blue_count',0) for p,_ in b)+sum(p.get('red_count',0) for p,_ in r)
             if side_cost(red,blue)<side_cost(blue,red):

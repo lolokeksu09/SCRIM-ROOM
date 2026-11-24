@@ -1,4 +1,4 @@
-# SCRIM ROOM — 1.0.0-rc.6
+# SCRIM ROOM — 1.0.0-rc.7
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
@@ -164,3 +164,6 @@ Nine screen/panel source files and shared UI primitives; immutable UI state and 
 
 ## RC.6 — Design & Experience
 Compact shared spacing and navigation rows, stage-aware match navigation, paired role roster and readiness indicator, expandable balance details, decline confirmation, actual recent Elo history with selectable ranges, win/loss proportions, stage-based cup bracket, per-document local preview and removal, and a cached unread count (updated on settings refresh). Demo mode is collapsed for online users. No generated statistics, new server dependency or gameplay changes. Local document preview decodes bounded sampled bitmaps; it is not OCR or an upload. API history stays limited to 50 records; the graph uses only non-void rating changes. Existing admin/competition rules unchanged.
+
+## RC.7 — Performance & Reliability
+Batched history enrichment: two queries per 200 candidate IDs (four queries for 217), equivalent to the previous per-player implementation, with SQL indexes and an early role-feasibility guard. Reject impossible role gaps and team average gaps before expensive objective scoring; the rating rules are unchanged. Admin directory uses server-side search/filter/pagination (30 rows default, max 100), deterministic ordering, independent global counts and a detail endpoint. The legacy array route now returns at most 100 newest entries. Offset pagination may shift under concurrent insertions. Process-local latency telemetry retains at most 512 samples per each of four route groups, exposes p50/p95/max/5xx and peak RSS to moderators; reset on restart; measures middleware latency, not end-to-end mobile latency. No credentials or raw paths retained. CI includes query-count parity and concurrent HTTP ASGI smoke with synthetic data; it does not establish production throughput or VDS capacity. See docs/PERFORMANCE.md.

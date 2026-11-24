@@ -10,7 +10,8 @@ from urllib.request import urlopen
 
 from fastapi.testclient import TestClient
 from playwright.sync_api import sync_playwright, expect
-from server.app import create_app
+from server.app import create_app, Database
+from server.tests.test_batch_history import seed
 from server.tests.test_api import ADMIN, register, auth, photo
 
 out = Path("admin-browser-evidence")
@@ -23,6 +24,9 @@ with tempfile.TemporaryDirectory() as tmp:
             response = c.post("/v1/me/evidence", headers=auth(account),
                               files={"image": (f"{i}.png", photo(i), "image/png")})
             assert response.status_code == 200
+    with Database(db).transaction(write=True) as connection:
+        seed(connection,n=31,rounds=0)
+        connection.execute("UPDATE accounts SET status='REJECTED' WHERE id LIKE 'p%' ")
     env = {**os.environ, "SCRIM_DB_PATH": db, "SCRIM_ADMIN_KEY": ADMIN}
     base = "http://127.0.0.1:8765"
     with (out / "server.log").open("w") as log:
@@ -52,6 +56,15 @@ with tempfile.TemporaryDirectory() as tmp:
                 page.get_by_role("button", name="Войти", exact=True).click()
                 expect(page.locator("#workspace")).to_be_visible()
                 expect(page.locator("#login")).to_be_hidden()
+                page.locator("#filter").select_option("ALL")
+                expect(page.locator("#pageInfo")).to_have_text("1–30 / 32")
+                page.locator("#pageNext").click()
+                expect(page.locator("#pageInfo")).to_have_text("31–32 / 32")
+                expect(page.locator("#list .account")).to_have_count(2)
+                page.locator("#pagePrev").click()
+                expect(page.locator("#pageInfo")).to_have_text("1–30 / 32")
+                page.locator("#filter").select_option("PENDING_REVIEW")
+                expect(page.locator("#pageInfo")).to_have_text("1–1 / 1")
                 page.locator("#search").fill("not-found")
                 expect(page.locator("#list")).to_contain_text("Нет заявок")
                 page.locator("#search").clear()
