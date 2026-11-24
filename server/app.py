@@ -17,9 +17,10 @@ import time
 import uuid
 from contextlib import contextmanager
 from typing import Literal
+from pathlib import Path
 
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, Request
+from fastapi.responses import Response, FileResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -141,6 +142,14 @@ def account_dict(db, row):
     }
 
 
+def review_revision(db, row):
+    # Bind moderation to the profile and evidence actually reviewed.
+    evidence = db.execute('SELECT slot,sha256 FROM evidence WHERE account_id=? ORDER BY slot', (row['id'],)).fetchall()
+    fields = [row[k] for k in ('id','riot_id','region','current_rank','previous_rank','primary_role','secondary_role','status')]
+    fields.extend(f"{item['slot']}:{item['sha256']}" for item in evidence)
+    return hashlib.sha256(repr(fields).encode()).hexdigest()
+
+
 def get_user(db, token):
     if not token:
         raise HTTPException(401, 'Необходим токен участника')
@@ -251,6 +260,31 @@ def create_app(db_path: str, admin_key: str | None = None):
     def admin_auth(x_admin_key: str | None = Header(default=None)):
         if not admin_key or len(admin_key) < 32 or not x_admin_key or not hmac.compare_digest(x_admin_key, admin_key):
             raise HTTPException(403, 'Нет доступа администратора')
+
+    admin_dir = Path(__file__).resolve().parent / 'admin'
+
+    @app.middleware('http')
+    async def protect_admin_responses(request: Request, call_next):
+        response = await call_next(request)
+        if request.url.path == '/admin' or request.url.path.startswith(('/admin/', '/v1/admin/')):
+            response.headers['Cache-Control'] = 'no-store'
+            response.headers['X-Content-Type-Options'] = 'nosniff'
+            response.headers['X-Frame-Options'] = 'DENY'
+            response.headers['Referrer-Policy'] = 'no-referrer'
+            response.headers['Content-Security-Policy'] = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
+        return response
+
+    @app.get('/admin', include_in_schema=False)
+    def admin_panel():
+        return FileResponse(admin_dir / 'index.html', media_type='text/html')
+
+    @app.get('/admin/style.css', include_in_schema=False)
+    def admin_style():
+        return FileResponse(admin_dir / 'style.css', media_type='text/css')
+
+    @app.get('/admin/app.js', include_in_schema=False)
+    def admin_script():
+        return FileResponse(admin_dir / 'app.js', media_type='application/javascript')
 
     @app.get('/healthz')
     def healthz():
@@ -389,7 +423,14 @@ def create_app(db_path: str, admin_key: str | None = None):
     def admin_accounts():
         with store.transaction() as db:
             rows=db.execute('SELECT * FROM accounts ORDER BY created_at DESC').fetchall()
-            return [account_dict(db,row) for row in rows]
+            return [dict(account_dict(db,row), review_revision=review_revision(db,row)) for row in rows]
+
+    @app.get('/v1/admin/matches', dependencies=[Depends(admin_auth)])
+    def admin_matches():
+        with store.transaction(write=True) as db:
+            _expire_ready_checks(db)
+            rows = db.execute("SELECT id FROM matches WHERE status IN ('READY_CHECK','ACTIVE') ORDER BY created_at DESC").fetchall()
+            return [_match_info(db, row['id']) for row in rows]
 
     @app.get('/v1/admin/accounts/{account_id}/evidence/{slot}', dependencies=[Depends(admin_auth)])
     def admin_evidence(account_id:str,slot:int):
@@ -400,11 +441,13 @@ def create_app(db_path: str, admin_key: str | None = None):
             return Response(content=image['content'],media_type='image/jpeg',headers={'Cache-Control':'no-store'})
 
     @app.post('/v1/admin/accounts/{account_id}/approve', dependencies=[Depends(admin_auth)])
-    def admin_approve(account_id:str):
+    def admin_approve(account_id:str, x_review_revision: str | None = Header(default=None)):
         with store.transaction(write=True) as db:
             user=db.execute('SELECT * FROM accounts WHERE id=?',(account_id,)).fetchone()
             if not user:
                 raise HTTPException(404,'Участник не найден')
+            if x_review_revision is not None and not hmac.compare_digest(x_review_revision, review_revision(db,user)):
+                raise HTTPException(409,'Анкета изменилась. Обнови заявку и проверь документы заново.')
             evidence=db.execute('SELECT count(*) FROM evidence WHERE account_id=?',(account_id,)).fetchone()[0]
             if evidence<2:
                 raise HTTPException(409,'Нужно минимум два подтверждающих скриншота')
@@ -412,8 +455,15 @@ def create_app(db_path: str, admin_key: str | None = None):
             return account_dict(db,db.execute('SELECT * FROM accounts WHERE id=?',(account_id,)).fetchone())
 
     @app.post('/v1/admin/accounts/{account_id}/reject', dependencies=[Depends(admin_auth)])
-    def admin_reject(account_id:str):
+    def admin_reject(account_id:str, x_review_revision: str | None = Header(default=None)):
         with store.transaction(write=True) as db:
+            user = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
+            if not user:
+                raise HTTPException(404,'Участник не найден')
+            if x_review_revision is not None and not hmac.compare_digest(x_review_revision, review_revision(db,user)):
+                raise HTTPException(409,'Анкета изменилась. Обнови заявку.')
+            if _active_match_id(db, account_id):
+                raise HTTPException(409,'Нельзя отклонить участника во время назначенного матча')
             changed=db.execute("UPDATE accounts SET status='REJECTED' WHERE id=?",(account_id,)).rowcount
             if not changed:
                 raise HTTPException(404,'Участник не найден')

@@ -1,8 +1,8 @@
-# SCRIM ROOM — Android + pilot server 0.2.1
+# SCRIM ROOM — Android + pilot server 0.2.2
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
-## Delivered in 0.2.1
+## Delivered in 0.2.2
 
 ### Native Android client
 - Kotlin / Jetpack Compose, AMOLED UI, minSdk 26, targetSdk 35.
@@ -65,6 +65,10 @@ curl -s http://127.0.0.1:8765/healthz
 
 For persistence across deployments, **store the key in a secret environment manager or non-committed `.env` file**. Docker restarts without the same key otherwise break moderator access. Expose the service only through Caddy/Nginx HTTPS. Back up the named Docker volume (SQLite DB and screenshot evidence). Use `--workers 1`; the in-process lock is not cross-worker.
 
+## Moderator console
+
+Open `/admin` on the configured HTTPS server. Enter the administrator key from the deployment secret store. The console does not persist the key or expose account data without authorization. Review the uploaded evidence, confirm identity independently, approve/reject applications and close completed active matches. An outdated review is rejected by the API. No production deployment is included.
+
 ## Manual moderation
 
 Screenshots cannot prove account ownership on their own. Never approve automatically from an uploaded rank.
@@ -87,7 +91,7 @@ For screenshot retrieval use `GET /v1/admin/accounts/{account_id}/evidence/{slot
 - **No Riot Sign On** or proof that a submitted Riot ID belongs to the registrant. The moderator must confirm independently.
 - No end-to-end custom lobby automation or Riot match result API. Teams enter Wild Rift custom games manually.
 - No match result consensus, Elo recalculation, public leaderboard, push notification or recovery across device reinstall.
-- The server is designed for a **controlled, invited pilot**, not arbitrary public traffic. Rate limiting, abuse protection, audit logging, account recovery, retention/deletion policy, and moderation UI are still required before an unrestricted launch.
+- The server is designed for a **controlled, invited pilot**, not arbitrary public traffic. Rate limiting, abuse protection, audit logging, account recovery, retention/deletion policy, are still required before an unrestricted launch.
 - If login token is lost, the user cannot restore the same pilot account from another device yet.
 - Screenshots are stored in a private SQLite volume, accessible to an administrator. Do not deploy without privacy disclosures, backup controls and a data retention plan.
 - Role-based matching may wait when a region lacks a sufficient combination of players.
@@ -104,7 +108,7 @@ Pure Kotlin engine has 19 standalone checks. Server API currently has 10 integra
 ## Roadmap 0.3
 
 - Real result confirmation by both captains and moderator conflict resolution.
-- Moderator console and evidence deletion / retention controls.
+- Evidence deletion / retention controls and moderator audit trail.
 - Observability, rate limiting, access recovery and secure invite-only pilot controls.
 - APK compile/run evidence and a release-signed artifact (with a key belonging to the project owner).
 

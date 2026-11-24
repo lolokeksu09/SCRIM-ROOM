@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SCRIM ROOM — Модерация</title><link rel="stylesheet" href="/admin/style.css"><script src="/admin/app.js" defer></script></head>
+<body><header><div class="brand"><span class="mark">SR</span><div><strong>SCRIM ROOM</strong><small>Панель модерации</small></div></div><button id="logout" hidden>Выйти</button></header>
+<main><section id="login"><h1>Вход администратора</h1><p>Используйте ключ из окружения сервера. Он не сохраняется в браузере. Не вводите ключ на сторонних сайтах.</p><form id="loginForm"><label for="key">Ключ администратора</label><input id="key" type="password" minlength="32" autocomplete="off" required><button class="primary" type="submit">Войти</button></form></section>
+<p id="notice" role="status" aria-live="polite"></p>
+<section id="workspace" hidden><div class="heading"><div><small>УПРАВЛЕНИЕ ПИЛОТОМ</small><h1>Заявки игроков</h1></div><button id="refresh">Обновить</button></div>
+<div id="metrics" class="metrics"></div><nav aria-label="Разделы"><button id="accountsTab" aria-pressed="true">Участники</button><button id="matchesTab" aria-pressed="false">Матчи</button></nav>
+<section id="accounts"><div class="filters"><label>Статус<select id="filter"><option value="PENDING_REVIEW">На проверке</option><option value="ALL">Все</option><option value="APPROVED">Допущены</option><option value="REJECTED">Отклонены</option></select></label><label>Поиск<input id="search" type="search" placeholder="Riot ID или регион"></label></div><div class="columns"><div id="list" aria-label="Заявки"></div><article id="detail" aria-label="Выбранная заявка"><p>Выберите заявку для проверки.</p></article></div></section>
+<section id="matches" hidden><h2>Назначенные матчи</h2><p>Активный матч можно закрыть после завершения пользовательской игры. Результат пока не записывается.</p><div id="matchList"></div></section></section></main>
+<dialog id="preview"><button id="closePreview">Закрыть</button><img id="fullImage" alt="Скриншот заявки"></dialog>
+</body></html>
