@@ -418,7 +418,7 @@ def create_app(db_path: str, admin_key: str | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.9.0', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='0.10.0', docs_url=None, redoc_url=None)
 
     def limit(scope, identity, maximum, period):
         stamp=now_ts()
@@ -436,15 +436,21 @@ def create_app(db_path: str, admin_key: str | None = None):
             raise HTTPException(401, 'Необходим токен участника')
         return authorization[7:]
 
-    def admin_auth(x_admin_key: str | None = Header(default=None)):
+    def admin_auth(request: Request,x_admin_key: str | None = Header(default=None)):
         if not admin_key or len(admin_key) < 32 or not x_admin_key or not hmac.compare_digest(x_admin_key, admin_key):
             raise HTTPException(403, 'Нет доступа администратора')
+        request.state.admin_authorized=True
 
     admin_dir = Path(__file__).resolve().parent / 'admin'
 
     @app.middleware('http')
     async def protect_admin_responses(request: Request, call_next):
         response = await call_next(request)
+        if request.url.path.startswith('/v1/'):
+            response.headers['Cache-Control']='no-store'
+        if getattr(request.state,'admin_authorized',False) and request.method in ('POST','PUT','PATCH','DELETE'):
+            from server.operations import audit_request
+            audit_request(store,request,response.status_code,now_ts())
         if request.url.path == '/admin' or request.url.path.startswith(('/admin/', '/v1/admin/')):
             response.headers['Cache-Control'] = 'no-store'
             response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -846,6 +852,8 @@ def create_app(db_path: str, admin_key: str | None = None):
     install_match_experience(app,store,token_header,admin_auth,limit,match_member,get_user,now_ts,_read_safe_image,MAX_IMAGE_BYTES)
     from server.competitive import install_competitive
     install_competitive(app,store,token_header,admin_auth,limit,get_user,now_ts)
+    from server.operations import install_operations
+    install_operations(app,store,token_header,admin_auth,limit,get_user,now_ts,account_dict)
     return app
 
 

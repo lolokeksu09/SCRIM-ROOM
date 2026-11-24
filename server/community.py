@@ -74,7 +74,9 @@ def install_community(app,store,token_header,admin_auth,limit,get_user,now,sessi
             u=actor(db,token)
             p=db.execute("SELECT * FROM accounts WHERE lower(riot_id)=lower(?) AND region=? AND status='APPROVED' AND id!=?",(riot_id.strip(),u['region'],u['id'])).fetchone()
             if not p: raise HTTPException(404,'Игрок не найден')
+            from server.operations import allows_contact
             rel=relation(db,u['id'],p['id'])
+            if not rel and not allows_contact(db,p['id']): raise HTTPException(404,'Игрок не найден')
             return dict(card(p),relationship=('FRIEND' if rel['status']=='ACCEPTED' else ('OUTGOING' if rel['requester']==u['id'] else 'INCOMING')) if rel else 'NONE')
 
     @app.get('/v1/community')
@@ -99,6 +101,8 @@ def install_community(app,store,token_header,admin_auth,limit,get_user,now,sessi
         quota(token,'friend_request',20)
         with store.transaction(write=True) as db:
             u=actor(db,token); p=peer(db,u,payload.account_id); a,b=pair(u['id'],p['id'])
+            from server.operations import allows_contact
+            if not allows_contact(db,p['id']): raise HTTPException(404,'Игрок не найден')
             rel=relation(db,a,b)
             if rel: raise HTTPException(409,'Запрос или дружба уже существует')
             count=db.execute('SELECT count(*) FROM friendships WHERE a=? OR b=?',(u['id'],u['id'])).fetchone()[0]

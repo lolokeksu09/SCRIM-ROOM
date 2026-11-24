@@ -176,7 +176,8 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
             u=actor(db,token); expire(db); t=captain(db,u); unlocked(db,t['id'])
             if len(roster(db,t))>=5: fail(409,'Состав заполнен')
             p=db.execute("SELECT * FROM accounts WHERE lower(riot_id)=lower(?) AND region=? AND status='APPROVED'",(payload.riot_id.strip(),u['region'])).fetchone()
-            if not p or p['id']==u['id']: fail(404,'Игрок не найден')
+            from server.operations import allows_contact
+            if not p or p['id']==u['id'] or not allows_contact(db,p['id']): fail(404,'Игрок не найден')
             if own(db,p): fail(409,'Игрок уже в команде')
             db.execute('INSERT OR IGNORE INTO club_invites VALUES(?,?,?,?)',(uid(),t['id'],p['id'],now()))
             return {'status':'PENDING'}
