@@ -1,4 +1,4 @@
-# SCRIM ROOM 1.0.0-rc.7 — release gate
+# SCRIM ROOM 1.0.0-rc.8 — release gate
 
 This is an invited-club release candidate, not a public launch.
 
@@ -54,3 +54,6 @@ Compact UI and real-data visualization. Verify on API33/35, actual physical devi
 
 ## RC.7
 Verify exact-revision API, browser pagination, emulator and Docker CI. Synthetic load is a regression smoke, not a production SLO. Record actual measured latency, RSS and queue behavior on target VDS before opening registration. The SQLite single-worker transaction lock remains; no database migration to a different engine is performed.
+
+## RC.8 final audit
+See [FINAL-AUDIT.md](FINAL-AUDIT.md). Before a public release, verify exact-revision CI, physical Android workflow, trusted release signature, backup/restore and real closed pilot. Production moderators must fetch a fresh review revision before accepting or rejecting an account; active match cancellation requires an explanation. Maintenance logically removes expired result-image bytes; backup retention and secure deletion require separate operator policy. No production configuration changes have been made.

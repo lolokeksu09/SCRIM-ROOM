@@ -523,7 +523,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             task.cancel()
             try: await task
             except asyncio.CancelledError: pass
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.7', docs_url=None, redoc_url=None, openapi_url=None,lifespan=lifespan)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.8', docs_url=None, redoc_url=None, openapi_url=None,lifespan=lifespan)
     app.add_middleware(RequestBodyLimit)
     app.state.performance=PerformanceWindow()
     with store.transaction(write=True) as db:

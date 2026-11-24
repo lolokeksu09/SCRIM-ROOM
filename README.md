@@ -1,4 +1,4 @@
-# SCRIM ROOM — 1.0.0-rc.7
+# SCRIM ROOM — 1.0.0-rc.8
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
@@ -167,3 +167,6 @@ Compact shared spacing and navigation rows, stage-aware match navigation, paired
 
 ## RC.7 — Performance & Reliability
 Batched history enrichment: two queries per 200 candidate IDs (four queries for 217), equivalent to the previous per-player implementation, with SQL indexes and an early role-feasibility guard. Reject impossible role gaps and team average gaps before expensive objective scoring; the rating rules are unchanged. Admin directory uses server-side search/filter/pagination (30 rows default, max 100), deterministic ordering, independent global counts and a detail endpoint. The legacy array route now returns at most 100 newest entries. Offset pagination may shift under concurrent insertions. Process-local latency telemetry retains at most 512 samples per each of four route groups, exposes p50/p95/max/5xx and peak RSS to moderators; reset on restart; measures middleware latency, not end-to-end mobile latency. No credentials or raw paths retained. CI includes query-count parity and concurrent HTTP ASGI smoke with synthetic data; it does not establish production throughput or VDS capacity. See docs/PERFORMANCE.md.
+
+## RC.8 — Final audit fixes
+Production approval/rejection requires a current X-Review-Revision (428 if missing; 409 if stale or malformed). The explicit test factory compatibility option strict_review=False remains for historical regression tests. Active-match cancellation requires a moderator reason on the strict production entrypoint. Lobby and evidence operations reject expired phases even before scheduled maintenance. Image normalization runs in synchronous worker routes instead of blocking the event loop; at most two concurrent image decoders, overload returns 503 with Retry-After. Scheduled maintenance deletes result evidence older than 30 days only from closed/cancelled matches, preserving hashes, and prunes audit rows older than 90 days. This is logical deletion, not guaranteed forensic erasure or backup removal. No profile verification evidence is removed. See docs/FINAL-AUDIT.md. No deployment or signing performed.
