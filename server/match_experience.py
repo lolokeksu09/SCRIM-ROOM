@@ -23,7 +23,7 @@ def match_details(db, match, own, moderator, stamp):
         'own_evidence':bool(own and any(r['side']==own['side'] for r in proof)),
     }
 
-def install_match_experience(app,store,token_header,admin_auth,limit,match_member,get_user,now,read_image,max_bytes):
+def install_match_experience(app,store,token_header,admin_auth,limit,match_member,get_user,now,read_image,max_bytes,phase_deadline):
     with store.transaction(write=True) as db:
         db.executescript("""
           CREATE TABLE IF NOT EXISTS match_lobbies(
@@ -43,7 +43,7 @@ def install_match_experience(app,store,token_header,admin_auth,limit,match_membe
     def member(db,token,mid,statuses):
         user,mp=match_member(db,token,mid)
         match=db.execute('SELECT * FROM matches WHERE id=?',(mid,)).fetchone()
-        if match['status'] not in statuses:
+        if match['status'] not in statuses or (match['status'] in ('ACTIVE','DISPUTED') and phase_deadline(db,match)<=now()):
             raise HTTPException(409,'Действие недоступно на этой стадии матча')
         return user,mp
 
@@ -73,18 +73,18 @@ def install_match_experience(app,store,token_header,admin_auth,limit,match_membe
             return {'arrived':count}
 
     @app.post('/v1/matches/{mid}/evidence')
-    async def upload_result(mid:str,image:UploadFile=File(...),token=Depends(token_header)):
+    def upload_result(mid:str,image:UploadFile=File(...),token=Depends(token_header)):
         with store.transaction() as db:
             user,mp=member(db,token,mid,('ACTIVE','DISPUTED'))
             if mp['role']!='BARON': raise HTTPException(403,'Скриншот отправляет капитан')
             ident=user['id']
         limit('result_evidence',ident,12,3600)
-        content=read_image(await image.read(max_bytes+1))
+        content=read_image(image.file.read(max_bytes+1))
         hashed=hashlib.sha256(content).hexdigest()
         with store.transaction(write=True) as db:
             user,mp=member(db,token,mid,('ACTIVE','DISPUTED'))
             if mp['role']!='BARON': raise HTTPException(403,'Скриншот отправляет капитан')
-            db.execute('DELETE FROM result_evidence WHERE created_at<?',(now()-30*86400,))
+            # Scheduled retention preserves hashes before removing expired image bytes.
             existing=db.execute('SELECT sha256 FROM result_evidence WHERE match_id=? AND side=?',(mid,mp['side'])).fetchone()
             if existing:
                 if existing['sha256']==hashed: return {'side':mp['side'],'status':'STORED'}

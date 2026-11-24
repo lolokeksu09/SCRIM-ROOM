@@ -34,6 +34,7 @@ from server.competition_guard import reserved_players, enforce_reservations, che
 from server.result_guard import review_reason, result_review_reason
 from server.moderator_auth import ModeratorCredentials
 from server.performance import PerformanceWindow
+from server.retention import prune_expired
 
 RANK_VALUES = {'BELOW_MASTER': 0, 'MASTER': 1, 'GRANDMASTER': 2, 'CHALLENGER': 3, 'SOVEREIGN': 4}
 RANK_SEEDS = {'GRANDMASTER': 1600, 'CHALLENGER': 1800, 'SOVEREIGN': 2000}
@@ -44,6 +45,7 @@ QUEUE_IDLE_SECONDS = 90
 ACTIVE_TIMEOUT_SECONDS = 2 * 3600
 DISPUTE_TIMEOUT_SECONDS = 48 * 3600
 MAINTENANCE_INTERVAL_SECONDS = 10
+IMAGE_DECODERS = threading.BoundedSemaphore(2)
 log = logging.getLogger(__name__)
 
 
@@ -465,6 +467,7 @@ def maintenance_tick(store):
         _expire_ready_checks(db)
         expire_unresolved_matches(db)
         clean_session_queues(db)
+        prune_expired(db,now_ts())
         scopes=db.execute("""SELECT q.region,qs.session_id FROM queue q
           LEFT JOIN queue_sessions qs ON qs.account_id=q.account_id
           GROUP BY q.region,qs.session_id HAVING count(*)>=10""").fetchall()
@@ -473,6 +476,15 @@ def maintenance_tick(store):
 
 
 def _read_safe_image(content: bytes) -> bytes:
+    if not IMAGE_DECODERS.acquire(blocking=False):
+        raise HTTPException(503,'Обработка изображений занята. Повтори запрос позже.',headers={'Retry-After':'2'})
+    try:
+        return _normalize_image(content)
+    finally:
+        IMAGE_DECODERS.release()
+
+
+def _normalize_image(content: bytes) -> bytes:
     if not content or len(content) > MAX_IMAGE_BYTES:
         raise HTTPException(413, 'Скриншот должен быть меньше 4 МБ')
     try:
@@ -486,11 +498,11 @@ def _read_safe_image(content: bytes) -> bytes:
             out = io.BytesIO()
             rgb.save(out, 'JPEG', quality=85, optimize=True)
             return out.getvalue()
-    except (OSError, UnidentifiedImageError, ValueError):
+    except (OSError, UnidentifiedImageError, ValueError, Image.DecompressionBombError):
         raise HTTPException(422, 'Файл не является изображением') from None
 
 
-def create_app(db_path: str, admin_key: str | None = None, registration_open: bool = True, strict_results: bool = False, moderator_hashes: dict[str,str] | None = None):
+def create_app(db_path: str, admin_key: str | None = None, registration_open: bool = True, strict_results: bool = False, moderator_hashes: dict[str,str] | None = None, strict_review: bool = False):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
@@ -649,12 +661,12 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             return account_dict(db,db.execute('SELECT * FROM accounts WHERE id=?',(user['id'],)).fetchone())
 
     @app.post('/v1/me/evidence')
-    async def submit_evidence(image: UploadFile=File(...),token=Depends(token_header)):
+    def submit_evidence(image: UploadFile=File(...),token=Depends(token_header)):
         with store.transaction() as db:
             user=get_user(db,token)
             ident=user['id']
         limit('evidence',ident,20,3600)
-        content=await image.read(MAX_IMAGE_BYTES+1)
+        content=image.file.read(MAX_IMAGE_BYTES+1)
         safe=_read_safe_image(content)
         hashed=hashlib.sha256(safe).hexdigest()
         with store.transaction(write=True) as db:
@@ -978,7 +990,9 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             user=db.execute('SELECT * FROM accounts WHERE id=?',(account_id,)).fetchone()
             if not user:
                 raise HTTPException(404,'Участник не найден')
-            if x_review_revision is not None and not hmac.compare_digest(x_review_revision, review_revision(db,user)):
+            if strict_review and x_review_revision is None:
+                raise HTTPException(428,'Сначала открой актуальную анкету для проверки')
+            if x_review_revision is not None and (len(x_review_revision)!=64 or not hmac.compare_digest(x_review_revision.encode('utf-8'),review_revision(db,user).encode('ascii'))):
                 raise HTTPException(409,'Анкета изменилась. Обнови заявку и проверь документы заново.')
             evidence=db.execute('SELECT count(*) FROM evidence WHERE account_id=?',(account_id,)).fetchone()[0]
             if evidence<2:
@@ -992,7 +1006,9 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             user = db.execute('SELECT * FROM accounts WHERE id=?', (account_id,)).fetchone()
             if not user:
                 raise HTTPException(404,'Участник не найден')
-            if x_review_revision is not None and not hmac.compare_digest(x_review_revision, review_revision(db,user)):
+            if strict_review and x_review_revision is None:
+                raise HTTPException(428,'Сначала открой актуальную анкету для проверки')
+            if x_review_revision is not None and (len(x_review_revision)!=64 or not hmac.compare_digest(x_review_revision.encode('utf-8'),review_revision(db,user).encode('ascii'))):
                 raise HTTPException(409,'Анкета изменилась. Обнови заявку.')
             if _active_match_id(db, account_id):
                 raise HTTPException(409,'Нельзя отклонить участника во время назначенного матча')
@@ -1004,18 +1020,23 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             return {'status':'REJECTED'}
 
     @app.post('/v1/admin/matches/{match_id}/close', dependencies=[Depends(admin_auth)])
-    def admin_close_match(match_id:str):
+    def admin_close_match(match_id:str,payload:ResolutionIn|None=None):
+        with store.transaction(write=True) as db: expire_unresolved_matches(db)
         with store.transaction(write=True) as db:
             row=db.execute('SELECT status FROM matches WHERE id=?',(match_id,)).fetchone()
             if not row or row['status']!='ACTIVE':
                 raise HTTPException(409,'Активный матч не найден')
+            if strict_results and (payload is None or payload.winner!='VOID' or len(payload.note.strip())<3):
+                raise HTTPException(422,'Укажи основание аннулирования матча')
+            if payload is not None and payload.note.strip():
+                db.execute('INSERT INTO result_moderation_notes VALUES(?,?)',(match_id,payload.note.strip()))
             _finish_result(db,match_id,'VOID','MODERATOR')
             return {'status':'CLOSED'}
 
     from server.community import install_community
     install_community(app, store, token_header, admin_auth, limit, get_user, now_ts, session_status)
     from server.match_experience import install_match_experience
-    install_match_experience(app,store,token_header,admin_auth,limit,match_member,get_user,now_ts,_read_safe_image,MAX_IMAGE_BYTES)
+    install_match_experience(app,store,token_header,admin_auth,limit,match_member,get_user,now_ts,_read_safe_image,MAX_IMAGE_BYTES,phase_deadline)
     from server.competitive import install_competitive
     install_competitive(app,store,token_header,admin_auth,limit,get_user,now_ts)
     from server.operations import install_operations
@@ -1026,5 +1047,5 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
 app = create_app(os.environ.get('SCRIM_DB_PATH','/tmp/scrim-room-pilot.db'),
                  admin_key=os.environ.get('SCRIM_ADMIN_KEY'),
                  registration_open=os.environ.get('SCRIM_REGISTRATION_OPEN','1')=='1',
-                 strict_results=True,
+                 strict_results=True,strict_review=True,
                  moderator_hashes=ModeratorCredentials.from_environment())

@@ -65,6 +65,13 @@ class RemoteClientIntegrationTest {
                 bitmap.recycle()
             }
             fun approve(accountId: String) {
+                val detail=URL("$base/v1/admin/accounts/$accountId").openConnection() as HttpsURLConnection
+                val revision=try {
+                    detail.connectTimeout=12000;detail.readTimeout=15000;detail.instanceFollowRedirects=false
+                    detail.setRequestProperty("X-Admin-Key","test-only-ephemeral-scrim-admin-key-for-local-ci")
+                    assertEquals(200,detail.responseCode)
+                    org.json.JSONObject(detail.inputStream.bufferedReader().use{it.readText()}).getString("review_revision")
+                }finally{detail.disconnect()}
                 val c = URL("$base/v1/admin/accounts/$accountId/approve").openConnection() as HttpsURLConnection
                 try {
                     c.requestMethod = "POST"
@@ -72,6 +79,7 @@ class RemoteClientIntegrationTest {
                     c.readTimeout = 15000
                     c.instanceFollowRedirects = false
                     c.setRequestProperty("X-Admin-Key", "test-only-ephemeral-scrim-admin-key-for-local-ci")
+                    c.setRequestProperty("X-Review-Revision",revision)
                     assertEquals(200, c.responseCode)
                     c.inputStream.use { it.readBytes() }
                 } finally { c.disconnect() }
