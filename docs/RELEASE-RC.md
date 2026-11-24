@@ -1,4 +1,4 @@
-# SCRIM ROOM 1.0.0-rc.3 — release gate
+# SCRIM ROOM 1.0.0-rc.4 — release gate
 
 This is an invited-club release candidate, not a public launch.
 
@@ -40,3 +40,6 @@ Compose defaults to closed registration (`SCRIM_REGISTRATION_OPEN=0`); existing 
 
 ## RC.3 safeguards
 Full-queue role feasibility; bounded alternate rosters; fixed maximum average gap 120 and role gap 400; periodic maintenance and explicit 2h active / 48h dispute timeouts with VOID and no Elo changes. Backup before upgrade: legacy overdue matches can be closed by maintenance. Review actual pilot outcomes before modifying thresholds; no assertion of Riot MMR or guaranteed fair outcome.
+
+## RC.4 safeguards
+Require distinct and non-reused result evidence for automatic Elo settlement on the production entrypoint. Missing or suspect evidence routes to manual review, with mandatory reason. Reservation covers scheduled fixtures and normal individual-match maximum duration; no automatic verification of gameplay. Check real pilot proof quality, retention and moderation; named moderator accounts remain a release blocker. No retrospective Elo changes.

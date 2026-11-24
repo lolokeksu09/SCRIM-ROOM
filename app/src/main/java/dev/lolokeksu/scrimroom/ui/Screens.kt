@@ -573,7 +573,7 @@ private fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boolea
         OnlineTeamPanel("Красная команда", match.red, Red)
         if (match.status in listOf("ACTIVE","DISPUTED") && match.isCaptain) {
             Eyebrow("Доказательство результата")
-            Text("Скриншотов от капитанов: ${match.evidenceCount}/2. Скриншот доступен модератору, не подтверждает результат автоматически.",color=Muted,fontSize=12.sp)
+            Text("Скриншотов от капитанов: ${match.evidenceCount}/2. Без двух разных скриншотов совпадающие результаты отправляются модератору. Снимок сам по себе не доказывает результат.",color=Muted,fontSize=12.sp)
             if (match.ownEvidence) StatusPill("Скриншот сохранён",active=true)
             else {
                 SecondaryAction("Выбрать скриншот результата",enabled=!busy) { resultPicker.launch(arrayOf("image/png","image/jpeg","image/webp")) }
@@ -601,7 +601,7 @@ private fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boolea
                 }
             } else Text(if (match.isCaptain) "Твой результат отправлен" else "Результат отправляют капитаны", color = Muted, fontSize = 12.sp)
         }
-        if (match.status == "DISPUTED") Text("Капитаны указали разных победителей. Матч ожидает модерации; новый поиск пока недоступен.", color = Red, fontSize = 13.sp)
+        if (match.status == "DISPUTED") Text("Результат требует проверки модератором: разные ответы капитанов или недостаточные доказательства. Новый поиск пока недоступен.", color = Red, fontSize = 13.sp)
     }
 }
 

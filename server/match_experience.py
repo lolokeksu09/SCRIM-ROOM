@@ -90,6 +90,7 @@ def install_match_experience(app,store,token_header,admin_auth,limit,match_membe
                 if existing['sha256']==hashed: return {'side':mp['side'],'status':'STORED'}
                 raise HTTPException(409,'Доказательство уже сохранено и не заменяется')
             db.execute('INSERT INTO result_evidence VALUES(?,?,?,?,?,?)',(mid,mp['side'],user['id'],content,hashed,now()))
+            db.execute('INSERT OR IGNORE INTO result_proof_history VALUES(?,?,?)',(mid,mp['side'],hashed))
             return {'side':mp['side'],'status':'STORED'}
 
     @app.get('/v1/admin/matches/{mid}/evidence/{side}',dependencies=[Depends(admin_auth)])

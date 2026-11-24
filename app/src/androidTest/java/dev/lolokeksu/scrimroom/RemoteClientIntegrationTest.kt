@@ -124,7 +124,7 @@ class RemoteClientIntegrationTest {
             val arrived = checkNotNull(api.state(host).toOnlineQueueState().match)
             assertEquals(10,arrived.lobbyArrivals)
             assertTrue(arrived.ownArrived)
-            captains.forEach { api.uploadResultEvidence(it,found.id,resolver,images.first()) }
+            captains.forEachIndexed { index, captain -> api.uploadResultEvidence(captain,found.id,resolver,images[index]) }
             assertEquals(2,api.state(host).toOnlineQueueState().match?.evidenceCount)
             assertTrue(checkNotNull(api.state(host).toOnlineQueueState().match).ownEvidence)
             val nonCaptain = tokens.first { it !in captains }

@@ -1,6 +1,7 @@
 """Independent fixed-roster competitions. No Riot automation or individual Elo changes."""
 import json
 import uuid
+from server.competition_guard import check_fixture_conflict, enforce_reservations, latest_individual_end
 from typing import Literal
 from fastapi import Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -83,13 +84,25 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
         if not t or t['captain']!=u['id']: fail(403,'Действие доступно капитану')
         return t
     def roster(db,t):
-        return [dict(r) for r in db.execute("""SELECT a.id,a.riot_id,a.status,a.region,a.primary_role AS role
+        return [dict(r) for r in db.execute("""SELECT a.id,a.riot_id,a.status,a.region,a.primary_role AS role,a.secondary_role AS secondary
           FROM club_members m JOIN accounts a ON a.id=m.account_id WHERE m.team_id=? ORDER BY a.id""",(t['id'],))]
+    def assign_roles(rows):
+        def visit(i,used,assigned):
+            if i==len(rows): return assigned
+            r=rows[i]
+            for role in dict.fromkeys((r['role'],r['secondary'])):
+                if role not in used:
+                    result=visit(i+1,used|{role},assigned+[{'id':r['id'],'riot_id':r['riot_id'],'role':role}])
+                    if result is not None:return result
+            return None
+        return visit(0,set(),[])
     def full(db,t):
         rows=roster(db,t)
         if len(rows)!=5 or any(r['status']!='APPROVED' or r['region']!=t['region'] for r in rows):
             fail(409,'Нужны пять допущенных участников одного региона')
-        return [{'id':r['id'],'riot_id':r['riot_id'],'role':r['role']} for r in rows]
+        assigned=assign_roles(rows)
+        if assigned is None: fail(409,'Состав должен покрывать пять ролей с учётом основной и второй позиции')
+        return assigned
     def locked(db,tid):
         return bool(db.execute("""SELECT 1 FROM club_fixtures WHERE ((team_a=? AND status='PENDING') OR ((team_a=? OR team_b=?) AND status='SCHEDULED'))
           UNION ALL SELECT 1 FROM club_cup_entries e JOIN club_cups c ON c.id=e.cup_id WHERE e.team_id=? AND c.status='RUNNING' LIMIT 1""",(tid,tid,tid,tid)).fetchone())
@@ -101,7 +114,7 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
           WHERE status='FINISHED' AND (team_a=? OR team_b=?)""",(t['id'],t['id'],t['id'])).fetchone()
         return {'id':t['id'],'name':t['name'],'region':t['region'],'captain':t['captain'],
           'members':rows,'locked':locked(db,t['id']),'played':stats['played'],'wins':stats['wins'],
-          'eligible':len(rows)==5 and all(r['status']=='APPROVED' and r['region']==t['region'] for r in rows)}
+          'eligible':len(rows)==5 and all(r['status']=='APPROVED' and r['region']==t['region'] for r in rows) and assign_roles(rows) is not None}
     def season(db,sid):
         s=db.execute('SELECT * FROM club_seasons WHERE id=?',(sid,)).fetchone()
         if not s: fail(404,'Сезон не найден')
@@ -239,9 +252,11 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
             if action=='accept':
                 if t['id']!=f['team_b']: fail(403,'Подтверждает капитан приглашённой команды')
                 unlocked(db,t['id'])
-                full(db,team(db,f['team_a']));rb=full(db,team(db,f['team_b']))
-                db.execute('UPDATE club_fixtures SET roster_b=? WHERE id=?',(json.dumps(rb),ident))
+                ra=full(db,team(db,f['team_a']));rb=full(db,team(db,f['team_b']))
+                check_fixture_conflict(db,ra+rb,f['starts_at'],now())
+                db.execute('UPDATE club_fixtures SET roster_a=?,roster_b=? WHERE id=?',(json.dumps(ra),json.dumps(rb),ident))
             db.execute('UPDATE club_fixtures SET status=? WHERE id=?',('SCHEDULED' if action=='accept' else 'CANCELLED',ident))
+            if action=='accept': enforce_reservations(db,now())
             return {'status':'SCHEDULED' if action=='accept' else 'CANCELLED'}
 
     @app.get('/v1/admin/competitive',dependencies=[Depends(admin_auth)])
@@ -268,10 +283,12 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
             if any(t['region']!=s['region'] for t in ts): fail(409,'Разные регионы')
             for t in ts: unlocked(db,t['id'])
             rosters=[full(db,t) for t in ts]; ident=uid()
+            check_fixture_conflict(db,[p for roster_rows in rosters for p in roster_rows],payload.starts_at,now())
             db.execute('INSERT INTO club_cups VALUES(?,?,?,\'RUNNING\',NULL,?)',(ident,name(payload.name),s['id'],payload.starts_at))
             for t in ts: db.execute('INSERT INTO club_cup_entries VALUES(?,?)',(ident,t['id']))
             for i,stage in ((0,'SEMIFINAL_1'),(2,'SEMIFINAL_2')):
                 insert_fixture(db,s['id'],ident,stage,ts[i]['id'],ts[i+1]['id'],payload.starts_at,'SCHEDULED',rosters[i],rosters[i+1])
+            enforce_reservations(db,now())
             return {'id':ident}
 
     @app.post('/v1/admin/competitive/fixtures/{ident}/resolve',dependencies=[Depends(admin_auth)])
@@ -288,9 +305,11 @@ def install_competitive(app,store,token_header,admin_auth,limit,get_user,now):
                     semis=db.execute("SELECT * FROM club_fixtures WHERE cup_id=? AND stage IN ('SEMIFINAL_1','SEMIFINAL_2') AND status='FINISHED' ORDER BY stage",(f['cup_id'],)).fetchall()
                     if len(semis)==2:
                         def winning_roster(x): return json.loads(x['roster_a'] if x['winner_id']==x['team_a'] else x['roster_b'])
-                        start=max(semis[0]['starts_at']+3600,now()+60)
+                        ra,rb=winning_roster(semis[0]),winning_roster(semis[1])
+                        start=max(semis[0]['starts_at']+3600,now()+60,latest_individual_end(db,ra+rb,now())+60)
                         # A delayed final stays part of the original season, even if resolved after its end.
-                        insert_fixture(db,f['season_id'],f['cup_id'],'FINAL',semis[0]['winner_id'],semis[1]['winner_id'],start,'SCHEDULED',winning_roster(semis[0]),winning_roster(semis[1]))
+                        insert_fixture(db,f['season_id'],f['cup_id'],'FINAL',semis[0]['winner_id'],semis[1]['winner_id'],start,'SCHEDULED',ra,rb)
+                        enforce_reservations(db,now())
             return {'status':'FINISHED'}
 
     @app.post('/v1/admin/competitive/fixtures/{ident}/cancel',dependencies=[Depends(admin_auth)])

@@ -30,6 +30,8 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from server.matchmaking import ROLES, choose_match, balance_metrics
 from server.match_intelligence import enrich_candidates, save_quality, load_quality
 from server.ocr import recognize_stats, OcrUnavailable
+from server.competition_guard import reserved_players, enforce_reservations, check_fixture_conflict
+from server.result_guard import review_reason, result_review_reason
 
 RANK_VALUES = {'BELOW_MASTER': 0, 'MASTER': 1, 'GRANDMASTER': 2, 'CHALLENGER': 3, 'SOVEREIGN': 4}
 RANK_SEEDS = {'GRANDMASTER': 1600, 'CHALLENGER': 1800, 'SOVEREIGN': 2000}
@@ -87,6 +89,7 @@ class ResultIn(BaseModel):
 
 class ResolutionIn(BaseModel):
     winner: Literal['BLUE', 'RED', 'VOID']
+    note: str = Field(default='',max_length=500)
 
 
 class SessionIn(BaseModel):
@@ -287,6 +290,7 @@ def _match_info(db, match_id, viewer_id=None, moderator=False):
         **extra,
         'quality': load_quality(db,match_id,full=moderator) if own is not None or moderator else None,
         'reports': {r['side']:r['winner'] for r in reports} if moderator else {},
+        'review_reason': result_review_reason(db,match_id) if own is not None or moderator else None,
         'result': dict(result) if result else None,
         'ready_count': sum(x['ready'] for x in players),
         'deadline': match['deadline'],
@@ -371,6 +375,7 @@ def touch_queue(db, ident):
 
 
 def clean_session_queues(db):
+    enforce_reservations(db,now_ts())
     # Existing pre-RC queue records fall back to joined_at. Expiration never penalizes a player.
     db.execute('''DELETE FROM queue WHERE account_id IN (
        SELECT q.account_id FROM queue q LEFT JOIN queue_presence p ON p.account_id=q.account_id
@@ -389,7 +394,7 @@ def requeue_match_player(db,mid,player):
             return
     else:
         sid=None
-    if discipline(db,player['id'])['blocked_until']: return
+    if discipline(db,player['id'])['blocked_until'] or player['id'] in reserved_players(db,now_ts()): return
     inserted=db.execute('INSERT OR IGNORE INTO queue(account_id,region,joined_at) VALUES(?,?,?)',(player['id'],player['region'],now_ts())).rowcount
     if inserted:
         touch_queue(db,player['id'])
@@ -413,6 +418,8 @@ def _expire_ready_checks(db):
 
 
 def _try_match(db, region, session_id=None):
+    # Never assign a waiting player reserved for an imminent fixed-roster fixture.
+    enforce_reservations(db,now_ts())
     # Role coverage spans the whole live regional/session queue.
     waiters = db.execute('''
       SELECT a.id,a.riot_id,a.region,a.primary_role AS "primary",
@@ -472,7 +479,7 @@ def _read_safe_image(content: bytes) -> bytes:
         raise HTTPException(422, 'Файл не является изображением') from None
 
 
-def create_app(db_path: str, admin_key: str | None = None, registration_open: bool = True):
+def create_app(db_path: str, admin_key: str | None = None, registration_open: bool = True, strict_results: bool = False):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
@@ -492,8 +499,14 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             task.cancel()
             try: await task
             except asyncio.CancelledError: pass
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.3', docs_url=None, redoc_url=None, openapi_url=None,lifespan=lifespan)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.4', docs_url=None, redoc_url=None, openapi_url=None,lifespan=lifespan)
     app.add_middleware(RequestBodyLimit)
+    with store.transaction(write=True) as db:
+        db.execute('CREATE TABLE IF NOT EXISTS result_review_flags(match_id TEXT PRIMARY KEY REFERENCES matches(id),reason TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS result_moderation_notes(match_id TEXT PRIMARY KEY REFERENCES matches(id),note TEXT NOT NULL)')
+        db.execute('CREATE TABLE IF NOT EXISTS result_proof_history(match_id TEXT NOT NULL REFERENCES matches(id),side TEXT NOT NULL,sha256 TEXT NOT NULL,PRIMARY KEY(match_id,side))')
+        db.execute('CREATE INDEX IF NOT EXISTS result_proof_hash ON result_proof_history(sha256)')
+
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(request, exc):
@@ -760,6 +773,8 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
                 raise HTTPException(403, 'Требуется одобрение заявки модератором')
             if _active_match_id(db,user['id']):
                 raise HTTPException(409, 'Игрок уже назначен на матч')
+            if user['id'] in reserved_players(db,now_ts()):
+                raise HTTPException(409,'Скоро командная встреча. Индивидуальный поиск временно недоступен')
             existing=db.execute('SELECT qs.session_id FROM queue q LEFT JOIN queue_sessions qs ON q.account_id=qs.account_id WHERE q.account_id=?',(user['id'],)).fetchone()
             if existing and existing['session_id']!=session_id:
                 raise HTTPException(409,'Сначала покинь текущую очередь')
@@ -849,9 +864,11 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             db.execute('INSERT INTO match_reports VALUES(?,?,?,?)',(match_id,member['side'],payload.winner,now_ts()))
             reports=db.execute('SELECT winner FROM match_reports WHERE match_id=?',(match_id,)).fetchall()
             if len(reports)==2:
-                if reports[0]['winner']==reports[1]['winner']:
+                reason='CAPTAIN_CONFLICT' if reports[0]['winner']!=reports[1]['winner'] else (review_reason(db,match_id) if strict_results else None)
+                if reason is None:
                     _finish_result(db,match_id,payload.winner,'CAPTAINS')
                 else:
+                    db.execute('INSERT OR REPLACE INTO result_review_flags VALUES(?,?)',(match_id,reason))
                     db.execute("UPDATE matches SET status='DISPUTED' WHERE id=?",(match_id,))
                     set_phase_deadline(db,match_id,DISPUTE_TIMEOUT_SECONDS)
             return _match_info(db,match_id,viewer_id=user['id'])
@@ -874,6 +891,9 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             row=db.execute('SELECT status FROM matches WHERE id=?',(match_id,)).fetchone()
             if not row or row['status']!='DISPUTED':
                 raise HTTPException(409,'Матч не находится на проверке')
+            if strict_results and len(payload.note.strip())<3:
+                raise HTTPException(422,'Укажи основание решения модератора')
+            if payload.note.strip(): db.execute('INSERT INTO result_moderation_notes VALUES(?,?)',(match_id,payload.note.strip()))
             _finish_result(db,match_id,payload.winner,'MODERATOR')
             return _match_info(db,match_id,moderator=True)
 
@@ -961,4 +981,5 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
 
 app = create_app(os.environ.get('SCRIM_DB_PATH','/tmp/scrim-room-pilot.db'),
                  admin_key=os.environ.get('SCRIM_ADMIN_KEY'),
-                 registration_open=os.environ.get('SCRIM_REGISTRATION_OPEN','1')=='1')
+                 registration_open=os.environ.get('SCRIM_REGISTRATION_OPEN','1')=='1',
+                 strict_results=True)
