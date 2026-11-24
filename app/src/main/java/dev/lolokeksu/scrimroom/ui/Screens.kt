@@ -390,8 +390,8 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                     when {
                         game != null -> OnlineMatchCard(game, vm, state.onlineBusy)
                         info?.queued == true -> {
-                            Text("Поиск запущен", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                            Text("Игроков в ожидании в этом регионе: ${info.waiting}", color = Muted, fontSize = 13.sp)
+                            Text(if (info.sessionId != null) "Поиск в игровой сессии" else "Поиск запущен", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                            Text("Игроков в текущей очереди: ${info.waiting}", color = Muted, fontSize = 13.sp)
                             SecondaryAction("Покинуть очередь", enabled = !state.onlineBusy) { vm.leaveOnlineQueue() }
                         }
                         else -> {
@@ -435,6 +435,63 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                 Text("Не связан с Wild Rift и не влияет на онлайн-очередь.", color = Muted, fontSize = 12.sp)
                 Button(onClick = { vm.finishDemo(Side.BLUE) }, modifier = Modifier.fillMaxWidth()) { Text("Победили синие") }
                 OutlinedButton(onClick = { vm.finishDemo(Side.RED) }, modifier = Modifier.fillMaxWidth()) { Text("Победили красные") }
+            }
+        }
+    }
+}
+
+@Composable
+fun SessionsScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit, onQueue: () -> Unit) {
+    LaunchedEffect(state.hasOnlineAccount, state.serverUrl) {
+        if (state.hasOnlineAccount) {
+            while (isActive) {
+                vm.loadSessions()
+                delay(15000L)
+            }
+        }
+    }
+    Page {
+        Eyebrow("Календарь / закрытые игры")
+        Headline("Игровые сессии", "Запишись заранее и войди в подбор в назначенное игровое окно. Запись не гарантирует матч.")
+        if (!state.hasOnlineAccount) {
+            PanelCard {
+                Text("Для расписания нужна онлайн-заявка.", color = Muted)
+                PrimaryAction("Открыть профиль") { onProfile() }
+            }
+        } else {
+            SecondaryAction("Обновить расписание", enabled = !state.onlineBusy) { vm.loadSessions() }
+            if (state.onlineStatus != "APPROVED") Text("Запись доступна только допущенным игрокам.", color = Muted)
+            val sessions = state.sessions
+            if (sessions == null) Text("Расписание ещё не загружено", color = Muted)
+            else if (sessions.isEmpty()) Text("Нет запланированных сессий в твоём регионе", color = Muted)
+            else sessions.forEach { event ->
+                PanelCard {
+                    Eyebrow(if (event.status == "OPEN") "СЕССИЯ ОТКРЫТА" else "ПРЕДСТОЯЩАЯ")
+                    Text(event.title, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                    val format = SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("ru"))
+                    Text(format.format(Date(event.startsAt * 1000)) + " — " + format.format(Date(event.endsAt * 1000)), color = Muted, fontSize = 13.sp)
+                    Text("Регион: ${event.region} · Записано: ${event.registered}/${event.capacity}", fontSize = 13.sp)
+                    Text("Основные роли: " + Role.entries.joinToString(" · ") { "${it.title} ${event.roles[it.name] ?: 0}" }, color = Muted, fontSize = 12.sp)
+                    Text("В очереди сейчас: ${event.waiting}", color = Accent, fontSize = 13.sp)
+                    if (event.enrolled) {
+                        StatusPill("Ты записан", active = true)
+                        if (event.status == "OPEN") {
+                            val queued = state.onlineQueue
+                            val alreadyHere = queued?.queued == true && queued.sessionId == event.id
+                            if (alreadyHere || queued?.match != null) {
+                                PrimaryAction("Перейти к очереди") { onQueue() }
+                            } else {
+                                PrimaryAction("Войти в очередь сессии", enabled = !state.onlineBusy && state.onlineStatus == "APPROVED" && queued?.queued != true && (queued?.blockedUntil ?: 0L) == 0L) {
+                                    vm.joinOnlineQueue(event.id)
+                                    onQueue()
+                                }
+                            }
+                        }
+                        SecondaryAction("Отменить запись", enabled = !state.onlineBusy && state.onlineQueue?.match == null) { vm.changeSession(event.id, false) }
+                    } else {
+                        PrimaryAction("Записаться", enabled = !state.onlineBusy && state.onlineStatus == "APPROVED" && event.registered < event.capacity) { vm.changeSession(event.id, true) }
+                    }
+                }
             }
         }
     }

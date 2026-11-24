@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import dev.lolokeksu.scrimroom.data.LocalStore
 import dev.lolokeksu.scrimroom.data.OnlineQueueState
 import dev.lolokeksu.scrimroom.data.OnlineResult
+import dev.lolokeksu.scrimroom.data.PlaySession
 import dev.lolokeksu.scrimroom.data.OcrSuggestions
 import dev.lolokeksu.scrimroom.data.RemoteClient
 import dev.lolokeksu.scrimroom.data.toOnlineQueueState
@@ -40,6 +41,7 @@ data class ScrimUiState(
     val onlineEvidenceCount: Int = 0,
     val onlineQueue: OnlineQueueState? = null,
     val onlineResults: List<OnlineResult>? = null,
+    val sessions: List<PlaySession>? = null,
     val ocrSuggestions: OcrSuggestions? = null,
     val onlineBusy: Boolean = false,
     val message: String? = null
@@ -80,6 +82,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             onlineStatus = if (changed) null else it.onlineStatus,
             onlineQueue = if (changed) null else it.onlineQueue,
             onlineResults = if (changed) null else it.onlineResults,
+            sessions = if (changed) null else it.sessions,
             ocrSuggestions = if (changed) null else it.ocrSuggestions,
             onlineEvidenceCount = if (changed) 0 else it.onlineEvidenceCount,
             message = if (changed) "HTTPS-сервер сохранён. Привязка к прежнему серверу сброшена." else "Адрес сервера сохранён."
@@ -192,12 +195,29 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(onlineQueue = queue, onlineStatus = queue.accountStatus.takeIf(String::isNotBlank) ?: it.onlineStatus) }
     }
 
-    fun joinOnlineQueue() = onlineAction {
+    fun joinOnlineQueue(sessionId: String? = null) = onlineAction {
         val api = RemoteClient(store.readServerUrl())
         val token = store.readServerToken()
         require(token.isNotBlank()) { "Сначала отправь заявку" }
-        api.join(token)
+        api.join(token, sessionId)
         _state.update { it.copy(onlineQueue = api.state(token).toOnlineQueueState()) }
+    }
+
+    fun loadSessions() = onlineAction {
+        val token = store.readServerToken()
+        if (token.isBlank()) return@onlineAction
+        val sessions = RemoteClient(store.readServerUrl()).sessions(token)
+        _state.update { it.copy(sessions = sessions) }
+    }
+
+    fun changeSession(id: String, enroll: Boolean) = onlineAction {
+        val token = store.readServerToken()
+        val api = RemoteClient(store.readServerUrl())
+        if (enroll) api.signup(token, id) else api.withdraw(token, id)
+        val sessions = api.sessions(token)
+        val queue = api.state(token).toOnlineQueueState()
+        _state.update { it.copy(sessions = sessions, onlineQueue = queue,
+            message = if (enroll) "Место забронировано. В назначенное время войди в очередь сессии." else "Запись отменена") }
     }
 
     fun leaveOnlineQueue() = onlineAction {

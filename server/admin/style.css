@@ -2,3 +2,5 @@
 .columns>*{min-width:0}.filters label{min-width:0}.filters input,.filters select{min-width:0;width:100%;max-width:100%}.evidence button{min-width:0}.evidence img{max-width:100%}.metric{min-width:0;overflow-wrap:anywhere}.heading>div{min-width:0}.heading h1{overflow-wrap:anywhere}article{min-width:0;overflow-wrap:anywhere}@media(max-width:680px){.columns{grid-template-columns:minmax(0,1fr)}.filters{flex-direction:column}.heading{flex-wrap:wrap}.evidence{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .evidence>div{min-width:0;display:grid;gap:8px;align-content:start}.evidence>div>button{width:100%;overflow-wrap:anywhere}.evidence>div>p{font-size:12px;margin:0;overflow-wrap:anywhere}
+
+#sessionList{margin-top:16px}#sessionForm input,#sessionForm select{min-width:0;width:100%}nav{flex-wrap:wrap}

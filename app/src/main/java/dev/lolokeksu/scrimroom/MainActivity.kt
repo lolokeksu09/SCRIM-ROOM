@@ -54,10 +54,12 @@ import dev.lolokeksu.scrimroom.ui.HistoryScreen
 import dev.lolokeksu.scrimroom.ui.HomeScreen
 import dev.lolokeksu.scrimroom.ui.ProfileScreen
 import dev.lolokeksu.scrimroom.ui.QueueScreen
+import dev.lolokeksu.scrimroom.ui.SessionsScreen
+import androidx.compose.material.icons.filled.DateRange
 import dev.lolokeksu.scrimroom.ui.ScrimTheme
 import dev.lolokeksu.scrimroom.ui.ScrimViewModel
 
-private enum class Tab(val title: String) { HOME("Главная"), PROFILE("Профиль"), QUEUE("Очередь"), HISTORY("Матчи") }
+private enum class Tab(val title: String) { HOME("Главная"), PROFILE("Профиль"), QUEUE("Очередь"), SESSIONS("Сессии"), HISTORY("Матчи") }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,6 +98,7 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
                         Tab.HOME -> Icons.Filled.Home
                         Tab.PROFILE -> Icons.Filled.Person
                         Tab.QUEUE -> Icons.Filled.People
+                        Tab.SESSIONS -> Icons.Filled.DateRange
                         Tab.HISTORY -> Icons.Filled.History
                     }
                     NavigationBarItem(
@@ -134,6 +137,7 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
                     )
                     Tab.PROFILE -> ProfileScreen(state.profile, state, vm)
                     Tab.QUEUE -> QueueScreen(state, vm, onProfile = { tabName = Tab.PROFILE.name })
+                    Tab.SESSIONS -> SessionsScreen(state, vm, onProfile = { tabName = Tab.PROFILE.name }, onQueue = { tabName = Tab.QUEUE.name })
                     Tab.HISTORY -> HistoryScreen(state.demoHistory, state, vm)
                 }
             }

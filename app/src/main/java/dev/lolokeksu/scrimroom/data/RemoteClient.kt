@@ -69,7 +69,21 @@ class RemoteClient(baseInput: String) {
 
     fun account(token: String): JSONObject = jsonRequest("GET", "/v1/me", token)
     fun state(token: String): JSONObject = jsonRequest("GET", "/v1/queue/state", token)
-    fun join(token: String): JSONObject = jsonRequest("POST", "/v1/queue/join", token)
+    fun join(token: String, sessionId: String? = null): JSONObject =
+        jsonRequest("POST", "/v1/queue/join" + (sessionId?.let { "?session_id=" + Uri.encode(it) } ?: ""), token)
+    fun sessions(token: String): List<PlaySession> {
+        val rows = jsonRequest("GET", "/v1/sessions", token).getJSONArray("sessions")
+        return (0 until rows.length()).map { i ->
+            val r = rows.getJSONObject(i)
+            val counts = r.getJSONObject("roles")
+            PlaySession(r.getString("id"), r.getString("title"), r.getString("region"),
+                r.getLong("starts_at"), r.getLong("ends_at"), r.getInt("capacity"),
+                r.getInt("registered"), r.getInt("waiting"), r.getString("status"),
+                r.getBoolean("enrolled"), listOf("BARON","JUNGLE","MID","DRAGON","SUPPORT").associateWith { counts.optInt(it) })
+        }
+    }
+    fun signup(token: String, id: String) = jsonRequest("POST", "/v1/sessions/${Uri.encode(id)}/signup", token)
+    fun withdraw(token: String, id: String) = jsonRequest("POST", "/v1/sessions/${Uri.encode(id)}/withdraw", token)
     fun leave(token: String): JSONObject = jsonRequest("POST", "/v1/queue/leave", token)
     fun ready(token: String, matchId: String): JSONObject = jsonRequest("POST", "/v1/matches/$matchId/ready", token)
     fun decline(token: String, matchId: String): JSONObject = jsonRequest("POST", "/v1/matches/$matchId/decline", token)
@@ -157,13 +171,16 @@ data class OnlineResult(val id: String, val winner: String, val side: String, va
 
 data class OcrSuggestions(val slot: Int, val matches: Int?, val winRate: Double?, val kda: Double?, val ranks: List<String>)
 
+data class PlaySession(val id: String, val title: String, val region: String, val startsAt: Long, val endsAt: Long, val capacity: Int, val registered: Int, val waiting: Int, val status: String, val enrolled: Boolean, val roles: Map<String, Int>)
+
 data class OnlineQueueState(
     val accountStatus: String,
     val queued: Boolean,
     val waiting: Int,
     val match: OnlineMatch?,
     val incidents: Int = 0,
-    val blockedUntil: Long = 0
+    val blockedUntil: Long = 0,
+    val sessionId: String? = null
 )
 
 fun JSONObject.toOnlineQueueState(): OnlineQueueState {
@@ -183,5 +200,5 @@ fun JSONObject.toOnlineQueueState(): OnlineQueueState {
     )
     return OnlineQueueState(optString("account_status"), optBoolean("queued"),
         optInt("waiting_in_region"), match, optJSONObject("discipline")?.optInt("incidents") ?: 0,
-        optJSONObject("discipline")?.optLong("blocked_until") ?: 0)
+        optJSONObject("discipline")?.optLong("blocked_until") ?: 0, optString("session_id").takeUnless { it.isBlank() || it == "null" })
 }
