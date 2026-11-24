@@ -71,6 +71,14 @@ class ProfileIn(BaseModel):
         return self
 
 
+class ResultIn(BaseModel):
+    winner: Literal['BLUE', 'RED']
+
+
+class ResolutionIn(BaseModel):
+    winner: Literal['BLUE', 'RED', 'VOID']
+
+
 class Database:
     def __init__(self, path):
         self.path = path
@@ -126,6 +134,20 @@ class Database:
                   side TEXT NOT NULL, role TEXT NOT NULL, ready INTEGER NOT NULL DEFAULT 0,
                   PRIMARY KEY(match_id,account_id), UNIQUE(match_id,side,role)
                 );
+                CREATE TABLE IF NOT EXISTS match_reports(
+                  match_id TEXT NOT NULL REFERENCES matches(id), side TEXT NOT NULL,
+                  winner TEXT NOT NULL, reported_at INTEGER NOT NULL,
+                  PRIMARY KEY(match_id,side)
+                );
+                CREATE TABLE IF NOT EXISTS match_results(
+                  match_id TEXT PRIMARY KEY REFERENCES matches(id), winner TEXT NOT NULL,
+                  source TEXT NOT NULL, resolved_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS rating_changes(
+                  match_id TEXT NOT NULL REFERENCES match_results(match_id),
+                  account_id TEXT NOT NULL REFERENCES accounts(id), before_rating INTEGER NOT NULL,
+                  after_rating INTEGER NOT NULL, PRIMARY KEY(match_id,account_id)
+                );
             ''')
             # executescript commits the surrounding transaction on some SQLite versions.
             # Commit is harmless when the transaction remains open; otherwise skip it.
@@ -159,7 +181,7 @@ def get_user(db, token):
     return row
 
 
-def _match_info(db, match_id):
+def _match_info(db, match_id, viewer_id=None, moderator=False):
     match = db.execute('SELECT * FROM matches WHERE id=?', (match_id,)).fetchone()
     if not match:
         return None
@@ -168,8 +190,16 @@ def _match_info(db, match_id):
       FROM match_players mp JOIN accounts a ON a.id=mp.account_id
       WHERE mp.match_id=? ORDER BY mp.side,mp.role
     ''', (match_id,)).fetchall()
+    reports = db.execute('SELECT side,winner FROM match_reports WHERE match_id=?', (match_id,)).fetchall()
+    result = db.execute('SELECT winner,source,resolved_at FROM match_results WHERE match_id=?', (match_id,)).fetchone()
+    own = next((p for p in players if p['account_id']==viewer_id), None)
+    captain = own is not None and own['role']=='BARON'
+    own_report = next((r['winner'] for r in reports if captain and r['side']==own['side']), None)
     return {
         'id': match['id'], 'status': match['status'], 'region': match['region'],
+        'is_captain': captain, 'own_report': own_report, 'report_count': len(reports),
+        'reports': {r['side']:r['winner'] for r in reports} if moderator else {},
+        'result': dict(result) if result else None,
         'ready_count': sum(x['ready'] for x in players),
         'deadline': match['deadline'],
         'blue': [{'account_id': x['account_id'], 'riot_id': x['riot_id'], 'rating_seed': x['rating'], 'role': x['role'], 'ready': bool(x['ready'])} for x in players if x['side']=='BLUE'],
@@ -180,10 +210,29 @@ def _match_info(db, match_id):
 def _active_match_id(db, account_id):
     row = db.execute('''
       SELECT m.id FROM matches m JOIN match_players mp ON mp.match_id=m.id
-      WHERE mp.account_id=? AND m.status IN ('READY_CHECK','ACTIVE')
+      WHERE mp.account_id=? AND m.status IN ('READY_CHECK','ACTIVE','DISPUTED')
       ORDER BY m.created_at DESC LIMIT 1
     ''', (account_id,)).fetchone()
     return row['id'] if row else None
+
+
+def _finish_result(db, mid, winner, source):
+    if db.execute('SELECT 1 FROM match_results WHERE match_id=?',(mid,)).fetchone():
+        raise HTTPException(409,'Результат уже сохранён')
+    players=db.execute('SELECT mp.account_id,mp.side,a.rating FROM match_players mp JOIN accounts a ON a.id=mp.account_id WHERE mp.match_id=?',(mid,)).fetchall()
+    if len(players)!=10 or any(sum(p['side']==side for p in players)!=5 for side in ('BLUE','RED')):
+        raise HTTPException(409,'Неполный состав матча')
+    db.execute('INSERT INTO match_results VALUES(?,?,?,?)',(mid,winner,source,now_ts()))
+    if winner!='VOID':
+        blue=sum(p['rating'] for p in players if p['side']=='BLUE')/5
+        red=sum(p['rating'] for p in players if p['side']=='RED')/5
+        p_blue=1/(1+10**max(-20,min(20,(red-blue)/400)))
+        delta=round(24*((1 if winner=='BLUE' else 0)-p_blue))
+        for p in players:
+            after=p['rating']+(delta if p['side']=='BLUE' else -delta)
+            db.execute('UPDATE accounts SET rating=? WHERE id=?',(after,p['account_id']))
+            db.execute('INSERT INTO rating_changes VALUES(?,?,?,?)',(mid,p['account_id'],p['rating'],after))
+    db.execute("UPDATE matches SET status='CLOSED' WHERE id=?",(mid,))
 
 
 def _expire_ready_checks(db):
@@ -319,13 +368,17 @@ def create_app(db_path: str, admin_key: str | None = None):
             if _active_match_id(db,user['id']):
                 raise HTTPException(409, 'Заверши текущий матч перед изменением анкеты')
             high_rank=max((payload.current_rank,payload.previous_rank), key=lambda v:RANK_VALUES[v])
+            played = db.execute('SELECT 1 FROM rating_changes WHERE account_id=? LIMIT 1',(user['id'],)).fetchone()
+            if played and (payload.riot_id.casefold()!=user['riot_id'].casefold() or payload.region!=user['region']):
+                raise HTTPException(409,'После подтверждённых матчей смена Riot ID или региона требует отдельной проверки')
+            rating = user['rating'] if played else RANK_SEEDS[high_rank]
             db.execute('DELETE FROM queue WHERE account_id=?',(user['id'],))
             db.execute('DELETE FROM evidence WHERE account_id=?',(user['id'],))
             try:
                 db.execute('''UPDATE accounts SET riot_id=?,region=?,current_rank=?,previous_rank=?,
                     primary_role=?,secondary_role=?,rating=?,status='PENDING_REVIEW' WHERE id=?''',
                     (payload.riot_id,payload.region,payload.current_rank,payload.previous_rank,
-                     payload.primary,payload.secondary,RANK_SEEDS[high_rank],user['id']))
+                     payload.primary,payload.secondary,rating,user['id']))
             except sqlite3.IntegrityError:
                 raise HTTPException(409, 'Такой Riot ID уже зарегистрирован')
             return account_dict(db,db.execute('SELECT * FROM accounts WHERE id=?',(user['id'],)).fetchone())
@@ -358,7 +411,7 @@ def create_app(db_path: str, admin_key: str | None = None):
             queued=db.execute('SELECT 1 FROM queue WHERE account_id=?',(user['id'],)).fetchone() is not None
             count=db.execute('SELECT count(*) FROM queue WHERE region=?',(user['region'],)).fetchone()[0]
             return {'account_status':user['status'],'queued':queued,'waiting_in_region':count,
-                    'match':_match_info(db,match_id) if match_id else None}
+                    'match':_match_info(db,match_id,viewer_id=user['id']) if match_id else None}
 
     @app.post('/v1/queue/join')
     def join_queue(token=Depends(token_header)):
@@ -373,7 +426,7 @@ def create_app(db_path: str, admin_key: str | None = None):
                        (user['id'],user['region'],now_ts()))
             _try_match(db,user['region'])
             match_id=_active_match_id(db,user['id'])
-            return {'queued':match_id is None,'match':_match_info(db,match_id) if match_id else None}
+            return {'queued':match_id is None,'match':_match_info(db,match_id,viewer_id=user['id']) if match_id else None}
 
     @app.post('/v1/queue/leave')
     def leave_queue(token=Depends(token_header)):
@@ -419,6 +472,49 @@ def create_app(db_path: str, admin_key: str | None = None):
                            (other['id'],other['region'],now_ts()))
             return {'status':'CANCELLED'}
 
+    @app.post('/v1/matches/{match_id}/result')
+    def report_result(match_id: str, payload: ResultIn, token=Depends(token_header)):
+        with store.transaction(write=True) as db:
+            user, member = match_member(db,token,match_id)
+            if member['role']!='BARON':
+                raise HTTPException(403,'Результат подтверждает только капитан')
+            match=db.execute('SELECT status FROM matches WHERE id=?',(match_id,)).fetchone()
+            prior=db.execute('SELECT winner FROM match_reports WHERE match_id=? AND side=?',(match_id,member['side'])).fetchone()
+            if prior:
+                if prior['winner']!=payload.winner:
+                    raise HTTPException(409,'Подтверждение уже отправлено')
+                return _match_info(db,match_id,viewer_id=user['id'])
+            if match['status']!='ACTIVE':
+                raise HTTPException(409,'Матч не принимает результаты')
+            db.execute('INSERT INTO match_reports VALUES(?,?,?,?)',(match_id,member['side'],payload.winner,now_ts()))
+            reports=db.execute('SELECT winner FROM match_reports WHERE match_id=?',(match_id,)).fetchall()
+            if len(reports)==2:
+                if reports[0]['winner']==reports[1]['winner']:
+                    _finish_result(db,match_id,payload.winner,'CAPTAINS')
+                else:
+                    db.execute("UPDATE matches SET status='DISPUTED' WHERE id=?",(match_id,))
+            return _match_info(db,match_id,viewer_id=user['id'])
+
+    @app.get('/v1/me/results')
+    def my_results(token=Depends(token_header)):
+        with store.transaction() as db:
+            user=get_user(db,token)
+            rows=db.execute('''SELECT r.match_id,r.winner,r.source,r.resolved_at,mp.side,
+                 rc.before_rating,rc.after_rating FROM match_results r
+                 JOIN match_players mp ON mp.match_id=r.match_id
+                 LEFT JOIN rating_changes rc ON rc.match_id=r.match_id AND rc.account_id=mp.account_id
+                 WHERE mp.account_id=? ORDER BY r.resolved_at DESC,r.match_id DESC LIMIT 50''',(user['id'],)).fetchall()
+            return {'results':[dict(row) for row in rows]}
+
+    @app.post('/v1/admin/matches/{match_id}/resolve', dependencies=[Depends(admin_auth)])
+    def resolve_result(match_id:str,payload:ResolutionIn):
+        with store.transaction(write=True) as db:
+            row=db.execute('SELECT status FROM matches WHERE id=?',(match_id,)).fetchone()
+            if not row or row['status']!='DISPUTED':
+                raise HTTPException(409,'Матч не находится на проверке')
+            _finish_result(db,match_id,payload.winner,'MODERATOR')
+            return _match_info(db,match_id,moderator=True)
+
     @app.get('/v1/admin/accounts', dependencies=[Depends(admin_auth)])
     def admin_accounts():
         with store.transaction() as db:
@@ -429,8 +525,8 @@ def create_app(db_path: str, admin_key: str | None = None):
     def admin_matches():
         with store.transaction(write=True) as db:
             _expire_ready_checks(db)
-            rows = db.execute("SELECT id FROM matches WHERE status IN ('READY_CHECK','ACTIVE') ORDER BY created_at DESC").fetchall()
-            return [_match_info(db, row['id']) for row in rows]
+            rows = db.execute("SELECT id FROM matches WHERE status IN ('READY_CHECK','ACTIVE','DISPUTED') ORDER BY created_at DESC").fetchall()
+            return [_match_info(db, row['id'],moderator=True) for row in rows]
 
     @app.get('/v1/admin/accounts/{account_id}/evidence/{slot}', dependencies=[Depends(admin_auth)])
     def admin_evidence(account_id:str,slot:int):
@@ -473,9 +569,10 @@ def create_app(db_path: str, admin_key: str | None = None):
     @app.post('/v1/admin/matches/{match_id}/close', dependencies=[Depends(admin_auth)])
     def admin_close_match(match_id:str):
         with store.transaction(write=True) as db:
-            changed=db.execute("UPDATE matches SET status='CLOSED' WHERE id=? AND status='ACTIVE'",(match_id,)).rowcount
-            if not changed:
+            row=db.execute('SELECT status FROM matches WHERE id=?',(match_id,)).fetchone()
+            if not row or row['status']!='ACTIVE':
                 raise HTTPException(409,'Активный матч не найден')
+            _finish_result(db,match_id,'VOID','MODERATOR')
             return {'status':'CLOSED'}
 
     return app

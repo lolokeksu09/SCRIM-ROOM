@@ -2,7 +2,7 @@
 const $=id=>document.getElementById(id);
 const ranks={BELOW_MASTER:'Алмаз и ниже',MASTER:'Мастер',GRANDMASTER:'Грандмастер',CHALLENGER:'Претендент',SOVEREIGN:'Суверен'};
 const roles={BARON:'Барон',JUNGLE:'Лес',MID:'Мид',DRAGON:'ADC',SUPPORT:'Поддержка'};
-const labels={PENDING_REVIEW:'На проверке',APPROVED:'Допущен',REJECTED:'Отклонён',READY_CHECK:'Подтверждение',ACTIVE:'Активный'};
+const labels={PENDING_REVIEW:'На проверке',APPROVED:'Допущен',REJECTED:'Отклонён',READY_CHECK:'Подтверждение',ACTIVE:'Активный',DISPUTED:'Спорный результат'};
 let key='',accounts=[],matches=[],selected=null,epoch=0,busy=false,images=[];
 const node=(tag,value,cls)=>{const n=document.createElement(tag);if(value!==undefined)n.textContent=value;if(cls)n.className=cls;return n};
 function say(message){$('notice').textContent=message}
@@ -26,7 +26,7 @@ function render(){
  const filtered=accounts.filter(a=>(f==='ALL'||f===a.status)&&(!q||(a.riot_id+' '+a.region).toLocaleLowerCase().includes(q)));
  $('list').replaceChildren(...filtered.map(a=>{const b=node('button',a.riot_id,'account');b.type='button';b.setAttribute('aria-pressed',String(selected?.id===a.id));b.append(node('small',(labels[a.status]||a.status)+' · '+a.evidence_count+' фото · '+a.region));b.onclick=()=>{if(!busy)detail(a).catch(e=>{if(key)say(e.message)})};return b}));
  if(!filtered.length)$('list').append(node('p','Нет заявок по выбранному фильтру.'));
- $('matchList').replaceChildren(...matches.map(m=>{const card=node('article',undefined,'match');card.append(node('h2',(labels[m.status]||m.status)+' · '+m.region),node('p','Готовность: '+m.ready_count+'/10'));const teams=node('div',undefined,'teams');for(const [name,players] of [['Синие',m.blue],['Красные',m.red]]){const team=node('section');team.append(node('strong',name));players.forEach(p=>team.append(node('p',(roles[p.role]||p.role)+' · '+p.riot_id+(p.ready?' ✓':''))));teams.append(team)}card.append(teams);if(m.status==='ACTIVE'){const b=node('button','Закрыть матч');b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/close',null,'Закрыть завершённый матч?');card.append(b)}return card}));
+ $('matchList').replaceChildren(...matches.map(m=>{const card=node('article',undefined,'match');card.append(node('h2',(labels[m.status]||m.status)+' · '+m.region),node('p','Готовность: '+m.ready_count+'/10'));const teams=node('div',undefined,'teams');for(const [name,players] of [['Синие',m.blue],['Красные',m.red]]){const team=node('section');team.append(node('strong',name));players.forEach(p=>team.append(node('p',(roles[p.role]||p.role)+' · '+p.riot_id+(p.ready?' ✓':''))));teams.append(team)}card.append(teams);if(m.status==='ACTIVE'){card.append(node('p','Подтверждений капитанов: '+m.report_count+'/2'));const b=node('button','Аннулировать без очков','danger');b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/close',null,'Аннулировать матч без изменения оценки?');card.append(b)}if(m.status==='DISPUTED'){card.append(node('p','Капитан синих: '+m.reports.BLUE+' · Капитан красных: '+m.reports.RED),node('p','Проверьте доказательства вне приложения перед решением.'));const a=node('div',undefined,'actions');for(const [winner,label] of [['BLUE','Победа синих'],['RED','Победа красных'],['VOID','Аннулировать']]){const b=node('button',label);b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/resolve',null,'Подтвердить решение: '+label+'?',{winner});a.append(b)}card.append(a)}return card}));
  if(!matches.length)$('matchList').append(node('p','Назначенных матчей нет.'));
 }
 async function detail(a){
@@ -40,10 +40,10 @@ async function detail(a){
  for(let i=1;i<=a.evidence_count;i++){try{const response=await api('/accounts/'+encodeURIComponent(a.id)+'/evidence/'+i);const blob=await response.blob();if(version!==epoch||!key)return;const url=URL.createObjectURL(blob);images.push(url);const b=node('button');const img=node('img');img.src=url;img.alt='Документ '+i; b.append(img,node('span','Открыть документ '+i));b.onclick=()=>{$('fullImage').src=url;$('preview').showModal()};grid.append(b);loaded++}catch(e){if(version!==epoch||!key)return;grid.append(node('p','Документ '+i+': '+e.message))}}
  if(version===epoch)approve.disabled=a.status==='APPROVED'||loaded<2||loaded!==a.evidence_count;
 }
-async function mutate(path,revision,prompt){
+async function mutate(path,revision,prompt,body){
  if(busy||!key||!window.confirm(prompt))return;busy=true;
  const buttons=[...$('workspace').querySelectorAll('button')],disabled=buttons.map(b=>b.disabled);buttons.forEach(b=>b.disabled=true);
- try{await api(path,{method:'POST',headers:revision?{'X-Review-Revision':revision}:{}});say('Изменение сохранено.');await load()}catch(e){if(key){say(e.message);try{await load()}catch{}}}finally{busy=false;buttons.forEach((b,i)=>{if(b.isConnected)b.disabled=disabled[i]})}
+ try{await api(path,{method:'POST',headers:{...(revision?{'X-Review-Revision':revision}:{}),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});say('Изменение сохранено.');await load()}catch(e){if(key){say(e.message);try{await load()}catch{}}}finally{busy=false;buttons.forEach((b,i)=>{if(b.isConnected)b.disabled=disabled[i]})}
 }
 $('loginForm').onsubmit=async event=>{event.preventDefault();if(busy)return;key=$('key').value;$('key').value='';busy=true;try{await load();if(key){$('login').hidden=true;$('workspace').hidden=false;$('logout').hidden=false;say('')}}catch(e){logout(e.message)}finally{busy=false}};
 $('logout').onclick=()=>logout();$('refresh').onclick=()=>{if(!busy)load().catch(e=>{if(key)say(e.message)})};$('filter').onchange=render;$('search').oninput=render;

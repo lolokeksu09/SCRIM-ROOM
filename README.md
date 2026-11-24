@@ -90,7 +90,7 @@ For screenshot retrieval use `GET /v1/admin/accounts/{account_id}/evidence/{slot
 
 - **No Riot Sign On** or proof that a submitted Riot ID belongs to the registrant. The moderator must confirm independently.
 - No end-to-end custom lobby automation or Riot match result API. Teams enter Wild Rift custom games manually.
-- No match result consensus, Elo recalculation, public leaderboard, push notification or recovery across device reinstall.
+- No public leaderboard, push notification or recovery across device reinstall. Results require captain consensus or moderator resolution.
 - The server is designed for a **controlled, invited pilot**, not arbitrary public traffic. Rate limiting, abuse protection, audit logging, account recovery, retention/deletion policy, are still required before an unrestricted launch.
 - If login token is lost, the user cannot restore the same pilot account from another device yet.
 - Screenshots are stored in a private SQLite volume, accessible to an administrator. Do not deploy without privacy disclosures, backup controls and a data retention plan.
@@ -115,3 +115,6 @@ Pure Kotlin engine has 19 standalone checks. Server API currently has 10 integra
 ## Security & deployment status
 
 Public source code does **not** mean the registration service is publicly deployed. Player data belongs in private server storage with controlled administrator access; no screenshots or account records are checked into this repository. The Android debug APK is for testing only. The CI build has to pass before an APK can be described as available.
+
+## Private match results
+The assigned BARON player on each team is captain. Matching reports finalize atomically; disagreement blocks requeue until moderator resolution. Void results do not affect ratings. Private history is authenticated. Internal balancing uses symmetric Elo with K=24 and team means, not Riot MMR. Startup adds three tables without replacing existing tables. Back up the SQLite volume before upgrading. Historical closed matches are not retroactively scored.
