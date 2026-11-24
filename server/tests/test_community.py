@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 from server.app import create_app, now_ts
-from server.tests.test_api import ADMIN, register, auth, admin, approve
+from server.tests.test_api import ADMIN, register, auth, admin, approve, profile
 from server.tests.test_results import setup_match
 
 def test_friend_invite_authorization(tmp_path):
@@ -17,6 +17,7 @@ def test_friend_invite_authorization(tmp_path):
         assert c.post(f'/v1/community/friends/{bid}/accept',headers=auth(a)).status_code==409
         assert c.post(f'/v1/community/friends/{aid}/accept',headers=auth(b)).status_code==200
         assert c.get('/v1/community',headers=auth(a)).json()['friends'][0]['relationship']=='FRIEND'
+        assert c.put('/v1/me',headers=auth(a),json=profile(1999)).status_code==409
         t=now_ts()+60
         sid=c.post('/v1/admin/sessions',headers=admin(),json={'title':'Friends practice','region':'EUROPE','starts_at':t,'ends_at':t+600,'capacity':10}).json()['id']
         assert c.post('/v1/community/invites',headers=auth(a),json={'account_id':bid,'session_id':sid}).status_code==409

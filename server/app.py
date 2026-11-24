@@ -487,6 +487,12 @@ def create_app(db_path: str, admin_key: str | None = None):
             played = db.execute('SELECT 1 FROM rating_changes WHERE account_id=? LIMIT 1',(user['id'],)).fetchone()
             if played and (payload.riot_id.casefold()!=user['riot_id'].casefold() or payload.region!=user['region']):
                 raise HTTPException(409,'После подтверждённых матчей смена Riot ID или региона требует отдельной проверки')
+            identity_changed = payload.riot_id.casefold()!=user['riot_id'].casefold() or payload.region!=user['region']
+            if identity_changed:
+                social = db.execute('SELECT 1 FROM friendships WHERE a=? OR b=? LIMIT 1',(user['id'],user['id'])).fetchone()
+                history = db.execute('SELECT 1 FROM match_players WHERE account_id=? LIMIT 1',(user['id'],)).fetchone()
+                if social or history:
+                    raise HTTPException(409,'Смена Riot ID или региона после взаимодействия с игроками требует отдельной проверки')
             rating = user['rating'] if played else RANK_SEEDS[high_rank]
             db.execute('DELETE FROM queue WHERE account_id=?',(user['id'],))
             db.execute('DELETE FROM evidence WHERE account_id=?',(user['id'],))

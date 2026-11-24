@@ -129,6 +129,23 @@ class RemoteClientIntegrationTest {
                 assertEquals("BLUE", results[0].winner)
                 assertNull(api.state(token).toOnlineQueueState().match)
             }
+            // Social operations use the real authenticated Android HTTP client.
+            val firstToken = tokens.first()
+            val secondToken = tokens[1]
+            val firstAccount = api.account(firstToken)
+            val secondAccount = api.account(secondToken)
+            val firstId = firstAccount.getString("id")
+            val secondId = secondAccount.getString("id")
+            assertEquals(secondId, api.findPlayer(firstToken, secondAccount.getString("riot_id")).id)
+            api.requestFriend(firstToken,secondId)
+            assertEquals("INCOMING", api.community(secondToken).friends.single().relationship)
+            api.friendAction(secondToken,firstId,true)
+            assertEquals("FRIEND", api.community(firstToken).friends.single().relationship)
+            val target = api.community(firstToken).recent.first { it.accountId == secondId }
+            api.complain(firstToken,target.matchId,target.accountId,"AFK","Synthetic HTTPS integration check")
+            assertEquals("PENDING", api.community(firstToken).reports.single().status)
+            assertTrue(api.community(secondToken).reports.isEmpty())
+
             // A real scheduled session, distinct from the ordinary queue.
             val starts = System.currentTimeMillis() / 1000 + 5
             val c = URL("$base/v1/admin/sessions").openConnection() as HttpsURLConnection
@@ -147,6 +164,13 @@ class RemoteClientIntegrationTest {
                 assertEquals(201,c.responseCode)
                 sessionId = JSONObject(c.inputStream.bufferedReader().use { it.readText() }).getString("id")
             } finally { c.disconnect() }
+            api.signup(firstToken,sessionId)
+            api.inviteFriend(firstToken,secondId,sessionId)
+            val invitation = api.community(secondToken).invites.single()
+            assertEquals("CI practice",invitation.title)
+            assertFalse(api.sessions(secondToken).single { it.id==sessionId }.enrolled)
+            api.dismissInvite(secondToken,invitation.id)
+            assertTrue(api.community(secondToken).invites.isEmpty())
             tokens.forEach { token -> api.signup(token,sessionId) }
             val session = api.sessions(tokens.first()).single { it.id == sessionId }
             assertTrue(session.enrolled)
