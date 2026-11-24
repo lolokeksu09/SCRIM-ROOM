@@ -1,8 +1,8 @@
-# SCRIM ROOM — Android + pilot server 0.3.0
+# SCRIM ROOM — Android + pilot server 0.4.0
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
-## Delivered in 0.3.0
+## Delivered in 0.4.0
 
 ### Native Android client
 - Kotlin / Jetpack Compose, AMOLED UI, minSdk 26, targetSdk 35.
@@ -118,3 +118,6 @@ Public source code does **not** mean the registration service is publicly deploy
 
 ## Private match results
 The assigned BARON player on each team is captain. Matching reports finalize atomically; disagreement blocks requeue until moderator resolution. Void results do not affect ratings. Private history is authenticated. Internal balancing uses symmetric Elo with K=24 and team means, not Riot MMR. Startup adds three tables without replacing existing tables. Back up the SQLite volume before upgrading. Historical closed matches are not retroactively scored.
+
+## 0.4.0 pilot safeguards
+Tesseract English/Russian recognition is optional and on-demand for previously uploaded evidence, with a 12-second deadline and one concurrent recognition per process. Suggestions are not verification; only an explicit player choice copies a unique rank into the selected season field. Statistics are suggestions only. Duplicate normalized image hashes across current account evidence are moderator-only flags, not automatic bans. Decline cooldown is 60 seconds, no-ready timeout cooldown 120 seconds, independent of skill estimate. Fixed-window quotas: 30 registrations/hour per client IP, 20 evidence requests/hour per account, 12 OCR requests/hour per account, 30 queue joins/minute per account. Configure trusted proxy correctly; these are pilot quotas, not DDoS protection. Match-found banner refreshes every 10 seconds while the activity is STARTED; no background push or foreground-service guarantee. Real screenshots and deployment still require verification.

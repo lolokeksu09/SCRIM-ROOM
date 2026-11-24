@@ -296,6 +296,27 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
                 SecondaryAction("Очистить список изображений") { documents = emptyList() }
             }
         }
+        if (state.hasOnlineAccount && state.onlineEvidenceCount > 0) {
+            PanelCard {
+                Eyebrow("Распознавание статистики")
+                Text("OCR уже отправленных документов. Подсказки не подтверждают ранг или личность.", color = Muted, fontSize = 12.sp)
+                (1..state.onlineEvidenceCount.coerceAtMost(4)).forEach { slot ->
+                    SecondaryAction("Распознать скриншот $slot", enabled = !state.onlineBusy) { vm.recognizeEvidence(slot) }
+                }
+                state.ocrSuggestions?.let { result ->
+                    Text("Документ №${result.slot} · не проверено", color = Accent, fontSize = 12.sp)
+                    Text("Матчи: ${result.matches ?: "—"} · Винрейт: ${result.winRate?.let { "$it%" } ?: "—"} · KDA: ${result.kda ?: "—"}", fontSize = 13.sp)
+                    val candidate = result.ranks.singleOrNull()?.let { name -> Rank.entries.firstOrNull { it.name == name } }
+                    if (candidate != null) {
+                        Text("Найденный ранг: ${candidate.title}. Проверь, к какому сезону он относится.", fontSize = 12.sp)
+                        SecondaryAction("Подставить в текущий сезон") { currentRank = candidate }
+                        SecondaryAction("Подставить в прошлый сезон") { previousRank = candidate }
+                    } else if (result.ranks.isNotEmpty()) {
+                        Text("Найдено несколько рангов. Выбери вручную по оригиналу.", color = Muted, fontSize = 12.sp)
+                    }
+                }
+            }
+        }
         SecondaryAction("Сохранить локальный черновик") {
             vm.register(
                 PlayerProfile(
@@ -331,13 +352,6 @@ fun ProfileScreen(profile: PlayerProfile, state: ScrimUiState, vm: ScrimViewMode
 @Composable
 fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) {
     val demoTeamsRequester = remember { BringIntoViewRequester() }
-    val onlineAvailable = state.serverUrl.isNotBlank() && state.hasOnlineAccount
-    LaunchedEffect(onlineAvailable) {
-        while (isActive && onlineAvailable) {
-            vm.refreshQueue()
-            delay(10000L)
-        }
-    }
     Page {
         Eyebrow("Подбор / закрытые матчи")
         Headline("Очередь 5 × 5", "Онлайн-матчи на пилотном сервере и отдельный локальный деморежим.")
@@ -367,6 +381,12 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                     StatusPill("Допуск подтверждён", active = true)
                     val info = state.onlineQueue
                     val game = info?.match
+                    if (info != null) {
+                        Text("Отказы / пропуски готовности: ${info.incidents}", color = Muted, fontSize = 12.sp)
+                        if (info.blockedUntil > 0L) {
+                            Text("Поиск временно ограничен до " + SimpleDateFormat("HH:mm:ss", Locale("ru")).format(Date(info.blockedUntil * 1000)), color = Red, fontSize = 12.sp)
+                        }
+                    }
                     when {
                         game != null -> OnlineMatchCard(game, vm, state.onlineBusy)
                         info?.queued == true -> {
@@ -377,7 +397,7 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                         else -> {
                             Text("Ожидаем 10 подтверждённых участников одного региона. Подбор учитывает две предпочитаемые роли и предварительную оценку силы.",
                                 color = Muted, fontSize = 13.sp)
-                            PrimaryAction("Найти пользовательский матч", enabled = !state.onlineBusy) { vm.joinOnlineQueue() }
+                            PrimaryAction("Найти пользовательский матч", enabled = !state.onlineBusy && (info?.blockedUntil ?: 0L) == 0L) { vm.joinOnlineQueue() }
                         }
                     }
                     SecondaryAction("Обновить", enabled = !state.onlineBusy) { vm.refreshQueue() }

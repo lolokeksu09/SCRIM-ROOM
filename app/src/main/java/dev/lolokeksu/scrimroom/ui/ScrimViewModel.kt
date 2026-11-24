@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import dev.lolokeksu.scrimroom.data.LocalStore
 import dev.lolokeksu.scrimroom.data.OnlineQueueState
 import dev.lolokeksu.scrimroom.data.OnlineResult
+import dev.lolokeksu.scrimroom.data.OcrSuggestions
 import dev.lolokeksu.scrimroom.data.RemoteClient
 import dev.lolokeksu.scrimroom.data.toOnlineQueueState
 import dev.lolokeksu.scrimroom.match.MatchEngine
@@ -39,6 +40,7 @@ data class ScrimUiState(
     val onlineEvidenceCount: Int = 0,
     val onlineQueue: OnlineQueueState? = null,
     val onlineResults: List<OnlineResult>? = null,
+    val ocrSuggestions: OcrSuggestions? = null,
     val onlineBusy: Boolean = false,
     val message: String? = null
 )
@@ -78,6 +80,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             onlineStatus = if (changed) null else it.onlineStatus,
             onlineQueue = if (changed) null else it.onlineQueue,
             onlineResults = if (changed) null else it.onlineResults,
+            ocrSuggestions = if (changed) null else it.ocrSuggestions,
             onlineEvidenceCount = if (changed) 0 else it.onlineEvidenceCount,
             message = if (changed) "HTTPS-сервер сохранён. Привязка к прежнему серверу сброшена." else "Адрес сервера сохранён."
         ) }
@@ -106,7 +109,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         }
         val saved = cleaned.copy(verification = Verification.PENDING_REVIEW)
         store.writeProfile(saved)
-        _state.update { it.copy(profile = saved) }
+        _state.update { it.copy(profile = saved, ocrSuggestions = null) }
         onlineAction {
             val api = RemoteClient(store.readServerUrl())
             val fingerprint = fingerprint(saved)
@@ -235,6 +238,14 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         if (token.isBlank()) return@onlineAction
         val results = RemoteClient(store.readServerUrl()).results(token)
         _state.update { it.copy(onlineResults = results) }
+    }
+
+    fun recognizeEvidence(slot: Int) = onlineAction {
+        val token = store.readServerToken()
+        if (token.isBlank()) return@onlineAction
+        _state.update { it.copy(ocrSuggestions = null) }
+        val suggestions = RemoteClient(store.readServerUrl()).recognizeEvidence(token, slot)
+        _state.update { it.copy(ocrSuggestions = suggestions, message = "Распознавание завершено. Проверь значения по оригиналу.") }
     }
 
     fun persistDocumentUris(uris: List<Uri>): List<String> {

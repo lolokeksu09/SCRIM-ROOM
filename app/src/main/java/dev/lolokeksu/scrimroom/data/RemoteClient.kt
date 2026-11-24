@@ -85,6 +85,15 @@ class RemoteClient(baseInput: String) {
         }
     }
 
+    fun recognizeEvidence(token: String, slot: Int): OcrSuggestions {
+        val obj = jsonRequest("POST", "/v1/me/evidence/$slot/ocr", token).getJSONObject("suggestions")
+        val ranks = obj.getJSONArray("rank_candidates")
+        return OcrSuggestions(slot, if (obj.isNull("matches")) null else obj.getInt("matches"),
+            if (obj.isNull("win_rate")) null else obj.getDouble("win_rate"),
+            if (obj.isNull("kda")) null else obj.getDouble("kda"),
+            (0 until ranks.length()).map { ranks.getString(it) })
+    }
+
     fun uploadEvidence(token: String, resolver: ContentResolver, uri: Uri): JSONObject {
         val mime = resolver.getType(uri)
         require(mime in setOf("image/png", "image/jpeg", "image/webp")) {
@@ -146,11 +155,15 @@ data class OnlineMatch(
 
 data class OnlineResult(val id: String, val winner: String, val side: String, val resolvedAt: Long)
 
+data class OcrSuggestions(val slot: Int, val matches: Int?, val winRate: Double?, val kda: Double?, val ranks: List<String>)
+
 data class OnlineQueueState(
     val accountStatus: String,
     val queued: Boolean,
     val waiting: Int,
-    val match: OnlineMatch?
+    val match: OnlineMatch?,
+    val incidents: Int = 0,
+    val blockedUntil: Long = 0
 )
 
 fun JSONObject.toOnlineQueueState(): OnlineQueueState {
@@ -169,5 +182,6 @@ fun JSONObject.toOnlineQueueState(): OnlineQueueState {
         matchObj.optInt("report_count")
     )
     return OnlineQueueState(optString("account_status"), optBoolean("queued"),
-        optInt("waiting_in_region"), match)
+        optInt("waiting_in_region"), match, optJSONObject("discipline")?.optInt("incidents") ?: 0,
+        optJSONObject("discipline")?.optLong("blocked_until") ?: 0)
 }

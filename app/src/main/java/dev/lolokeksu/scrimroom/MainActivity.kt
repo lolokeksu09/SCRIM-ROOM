@@ -42,7 +42,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.material3.TextButton
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.lolokeksu.scrimroom.ui.HistoryScreen
 import dev.lolokeksu.scrimroom.ui.HomeScreen
@@ -66,6 +72,16 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
     var tabName by rememberSaveable { mutableStateOf(Tab.HOME.name) }
     val tab = Tab.entries.firstOrNull { it.name == tabName } ?: Tab.HOME
     val snackbar = remember { SnackbarHostState() }
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val onlineAvailable = state.serverUrl.isNotBlank() && state.hasOnlineAccount
+    LaunchedEffect(lifecycle, onlineAvailable, state.serverUrl) {
+        if (onlineAvailable) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (isActive) {
+                vm.refreshQueue()
+                delay(10000L)
+            }
+        }
+    }
     LaunchedEffect(state.message) {
         state.message?.let { snackbar.showSnackbar(it); vm.dismissMessage() }
     }
@@ -102,6 +118,13 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
     ) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
             AppHeader()
+            if (state.onlineQueue?.match?.status == "READY_CHECK" && tab != Tab.QUEUE) {
+                Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF20291C)).padding(horizontal = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Text("Матч найден · подтверди готовность", color = Color(0xFFCCE879), modifier = Modifier.weight(1f), fontSize = 13.sp)
+                    TextButton(onClick = { tabName = Tab.QUEUE.name }) { Text("Открыть") }
+                }
+            }
             Box(modifier = Modifier.weight(1f)) {
                 when (tab) {
                     Tab.HOME -> HomeScreen(
