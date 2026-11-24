@@ -32,25 +32,49 @@ def role_estimates(db,ident,base):
     return estimate(base,[dict(r) for r in rows])
 
 def enrich_candidates(db,players,stamp):
+    """Batch history queries with bounded parameter lists and exact previous semantics."""
     ids={p['id'] for p in players}
+    history=defaultdict(list)
+    recent=defaultdict(list)
+    local=defaultdict(int)
+    ordered=sorted(ids)
+    for offset in range(0,len(ordered),200):
+        chunk=ordered[offset:offset+200]
+        marks=','.join('?' for _ in chunk)
+        for r in db.execute(f"""WITH ranked AS (
+          SELECT rc.account_id,mp.role,rc.after_rating-rc.before_rating AS delta,
+            row_number() OVER(PARTITION BY rc.account_id ORDER BY r.resolved_at DESC,r.match_id DESC) AS rn
+          FROM rating_changes rc JOIN match_results r ON r.match_id=rc.match_id
+          JOIN match_players mp ON mp.match_id=rc.match_id AND mp.account_id=rc.account_id
+          WHERE rc.account_id IN ({marks}) AND r.winner IN ('BLUE','RED'))
+          SELECT account_id,role,delta FROM ranked WHERE rn<=30 ORDER BY account_id,rn""",chunk):
+            history[r['account_id']].append(dict(r))
+        for r in db.execute(f"""WITH ranked AS (
+          SELECT mp.account_id,mp.match_id,mp.side,
+            row_number() OVER(PARTITION BY mp.account_id ORDER BY r.resolved_at DESC,r.match_id DESC) AS rn
+          FROM match_players mp JOIN match_results r ON r.match_id=mp.match_id
+          WHERE mp.account_id IN ({marks}) AND r.winner IN ('BLUE','RED') AND r.resolved_at>=?)
+          SELECT x.account_id,x.match_id,x.side,p.account_id AS peer
+          FROM ranked x JOIN match_players p ON p.match_id=x.match_id AND p.side=x.side
+          WHERE x.rn<=5 ORDER BY x.account_id,x.rn""",[*chunk,stamp-7*86400]):
+            ident=r['account_id']
+            if r['peer']==ident:
+                recent[ident].append(r['side'])
+            elif r['peer'] in ids:
+                local[(ident,r['peer'])]+=1
     pairs=defaultdict(int)
+    for (ident,peer),count in local.items():
+        key=tuple(sorted((ident,peer)))
+        pairs[key]=max(pairs[key],count)
     for p in players:
-        estimates=role_estimates(db,p['id'],p['rating'])
+        ident=p['id']
+        estimates=estimate(p['rating'],history[ident])
         p['role_strength']={r:v['estimate'] for r,v in estimates.items()}
         p['role_uncertainty']={r:v['uncertainty'] for r,v in estimates.items()}
-        recent=db.execute("""SELECT mp.match_id,mp.side FROM match_players mp
-          JOIN match_results r ON r.match_id=mp.match_id
-          WHERE mp.account_id=? AND r.winner IN ('BLUE','RED') AND r.resolved_at>=?
-          ORDER BY r.resolved_at DESC,r.match_id DESC LIMIT 5""",(p['id'],stamp-7*86400)).fetchall()
-        p['blue_count']=sum(r['side']=='BLUE' for r in recent)
-        p['red_count']=len(recent)-p['blue_count']
-        local=defaultdict(int)
-        for row in recent:
-            for peer in db.execute('SELECT account_id FROM match_players WHERE match_id=? AND side=?',(row['match_id'],row['side'])):
-                other=peer['account_id']
-                if other!=p['id'] and other in ids: local[tuple(sorted((p['id'],other)))]+=1
-        for pair,count in local.items(): pairs[pair]=max(pairs[pair],count)
+        p['blue_count']=recent[ident].count('BLUE')
+        p['red_count']=len(recent[ident])-p['blue_count']
     return players,dict(pairs)
+
 
 def save_quality(db,mid,quality):
     db.execute('INSERT INTO match_quality VALUES(?,?)',(mid,json.dumps(quality,separators=(',',':'),sort_keys=True)))

@@ -27,7 +27,7 @@ from server.request_guard import RequestBodyLimit
 from pydantic import BaseModel, Field, field_validator, model_validator
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from server.matchmaking import ROLES, choose_match, balance_metrics
+from server.matchmaking import ROLES, choose_match, balance_metrics, feasible_roster
 from server.match_intelligence import enrich_candidates, save_quality, load_quality
 from server.ocr import recognize_stats, OcrUnavailable
 from server.competition_guard import reserved_players, enforce_reservations, check_fixture_conflict
@@ -158,10 +158,13 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS queue_presence_time ON queue_presence(last_seen);
                 CREATE INDEX IF NOT EXISTS queue_region_time ON queue(region,joined_at);
+                CREATE INDEX IF NOT EXISTS accounts_created ON accounts(created_at DESC,id DESC);
+                CREATE INDEX IF NOT EXISTS accounts_status_created ON accounts(status,created_at DESC,id DESC);
                 CREATE TABLE IF NOT EXISTS matches(
                   id TEXT PRIMARY KEY, region TEXT NOT NULL,
                   status TEXT NOT NULL, created_at INTEGER NOT NULL, deadline INTEGER NOT NULL
                 );
+                CREATE INDEX IF NOT EXISTS matches_status_deadline ON matches(status,deadline);
                 CREATE TABLE IF NOT EXISTS match_phase_deadlines(
                   match_id TEXT PRIMARY KEY REFERENCES matches(id), expires_at INTEGER NOT NULL
                 );
@@ -203,6 +206,8 @@ class Database:
                   match_id TEXT PRIMARY KEY REFERENCES matches(id),session_id TEXT NOT NULL REFERENCES sessions(id)
                 );
                 CREATE INDEX IF NOT EXISTS session_region_start ON sessions(region,starts_at);
+                CREATE INDEX IF NOT EXISTS queue_sessions_scope ON queue_sessions(session_id,account_id);
+                CREATE INDEX IF NOT EXISTS session_signups_account ON session_signups(account_id,session_id);
                 CREATE TABLE IF NOT EXISTS match_reports(
                   match_id TEXT NOT NULL REFERENCES matches(id), side TEXT NOT NULL,
                   winner TEXT NOT NULL, reported_at INTEGER NOT NULL,
@@ -217,6 +222,8 @@ class Database:
                   account_id TEXT NOT NULL REFERENCES accounts(id), before_rating INTEGER NOT NULL,
                   after_rating INTEGER NOT NULL, PRIMARY KEY(match_id,account_id)
                 );
+                CREATE INDEX IF NOT EXISTS rating_changes_account ON rating_changes(account_id,match_id);
+                CREATE INDEX IF NOT EXISTS match_results_time ON match_results(resolved_at DESC,match_id DESC);
             ''')
             # executescript commits the surrounding transaction on some SQLite versions.
             # Commit is harmless when the transaction remains open; otherwise skip it.
@@ -431,7 +438,9 @@ def _try_match(db, region, session_id=None):
     ''', (region,session_id)).fetchall()
     if len(waiters) < 10:
         return
-    candidates, repeats = enrich_candidates(db,[dict(w) for w in waiters],now_ts())
+    candidates=[dict(w) for w in waiters]
+    if feasible_roster(candidates) is None: return
+    candidates, repeats = enrich_candidates(db,candidates,now_ts())
     picked=choose_match(candidates,repeats,now_ts())
     if picked is None:
         return
