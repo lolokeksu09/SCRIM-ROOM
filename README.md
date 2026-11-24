@@ -1,4 +1,4 @@
-# SCRIM ROOM — 1.0.0-rc.4
+# SCRIM ROOM — 1.0.0-rc.5
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
@@ -158,3 +158,6 @@ The role-feasibility pass scans the full live regional/session queue using augme
 
 ## RC.4
 Production ASGI entrypoint always requires two distinct, non-reused result screenshots before automatic captain-consensus Elo updates. Missing/duplicate/reused evidence routes the match to moderator review; a reason is mandatory for moderator resolution. The create_app test factory retains an explicit legacy mode via strict_results=False; new strict tests set True. Image hashes from RC.4 uploads remain for duplicate detection after image expiry; pre-RC.4 historical expired screenshots cannot be checked. Two distinct screenshots are not proof of a real match. Team fixtures require feasible coverage of all five roles using primary/secondary preferences. Players are reserved from 123 minutes before a scheduled fixture until 120 minutes after start or earlier closure; queued members are removed without penalty. Accepting a fixture rejects a known conflicting individual match. Cup finals may be delayed to avoid known individual match deadlines. This models scheduled play only, not actual Wild Rift telemetry; long delays require moderator rescheduling/cancellation. No production deployment.
+
+## RC.5 architecture and credential migration
+Nine screen/panel source files and shared UI primitives; immutable UI state and community/competition actions extracted, retaining a single session mutation coordinator. Foreground queue polling pauses while the optional queue service is running. AES-256-GCM token encryption using Android Keystore binds ciphertext to the configured server URL; successful migration replaces the legacy plaintext preference atomically. If the key is unavailable, recovery is required; save a recovery code before upgrade. No hardware-backed guarantee. Existing owner key remains compatible; optional `SCRIM_MODERATOR_HASHES` JSON maps unique operator names to SHA-256 digests of independent random 32-byte or longer secrets. Recreate the server to rotate/revoke named credentials. All named moderators have existing moderator permissions, not granular RBAC. Audit rows record the actor; legacy rows remain labeled `legacy`. No keys are provisioned and no server deployment performed.

@@ -145,7 +145,7 @@ function renderOperations(){
  $('serverStatus').replaceChildren(n);
  $('auditList').replaceChildren(...operations.audit.map(a=>{
    const card=node('article',undefined,'match');
-   card.append(node('strong',a.method+' '+a.route+' · HTTP '+a.status),node('p',new Date(a.at*1000).toLocaleString()+(a.resource?' · '+a.resource:'')));return card
+   card.append(node('strong',(a.actor||'legacy')+' · '+a.method+' '+a.route+' · HTTP '+a.status),node('p',new Date(a.at*1000).toLocaleString()+(a.resource?' · '+a.resource:'')));return card
  }));
  if(!operations.audit.length)$('auditList').append(node('p','Нет записей.'));
 }

@@ -1,4 +1,4 @@
-# SCRIM ROOM 1.0.0-rc.4 — release gate
+# SCRIM ROOM 1.0.0-rc.5 — release gate
 
 This is an invited-club release candidate, not a public launch.
 
@@ -43,3 +43,6 @@ Full-queue role feasibility; bounded alternate rosters; fixed maximum average ga
 
 ## RC.4 safeguards
 Require distinct and non-reused result evidence for automatic Elo settlement on the production entrypoint. Missing or suspect evidence routes to manual review, with mandatory reason. Reservation covers scheduled fixtures and normal individual-match maximum duration; no automatic verification of gameplay. Check real pilot proof quality, retention and moderation; named moderator accounts remain a release blocker. No retrospective Elo changes.
+
+## RC.5
+Save a recovery code before upgrading Android; migrated tokens require the device's Keystore. Configure named moderator credentials off-host using independently generated high-entropy secrets, store only SHA-256 digests in SCRIM_MODERATOR_HASHES, keep the owner key private, restart to revoke. Existing moderator routes share permissions; actor attribution is best effort and legacy audit rows are retained. No production keys or accounts were created.

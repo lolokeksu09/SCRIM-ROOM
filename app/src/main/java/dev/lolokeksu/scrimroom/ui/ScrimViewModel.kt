@@ -39,30 +39,6 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-data class ScrimUiState(
-    val profile: PlayerProfile = PlayerProfile(),
-    val demoMatch: MatchDraft? = null,
-    val demoScrollRequest: Long = 0,
-    val demoHistory: List<DemoResult> = emptyList(),
-    val serverUrl: String = "",
-    val hasOnlineAccount: Boolean = false,
-    val onlineStatus: String? = null,
-    val onlineEvidenceCount: Int = 0,
-    val onlineQueue: OnlineQueueState? = null,
-    val onlineResults: List<OnlineResult>? = null,
-    val personalStats: PersonalStats? = null,
-    val sessions: List<PlaySession>? = null,
-    val community: CommunityData? = null,
-    val club: ClubData? = null,
-    val inbox: List<InboxItem>? = null,
-    val discoverable: Boolean? = null,
-    val recoveryCode: String? = null,
-    val foundPlayer: SocialPlayer? = null,
-    val ocrSuggestions: OcrSuggestions? = null,
-    val onlineBusy: Boolean = false,
-    val message: String? = null
-)
-
 class ScrimViewModel(application: Application) : AndroidViewModel(application) {
     private val store = LocalStore(application)
     private val onlineMutex = Mutex()
@@ -71,7 +47,8 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             profile = store.readProfile(),
             demoHistory = store.readResults(),
             serverUrl = store.readServerUrl(),
-            hasOnlineAccount = store.readServerToken().isNotEmpty()
+            hasOnlineAccount = store.readServerToken().isNotEmpty(),
+            message = if(store.credentialUnavailable()) "Защищённый токен недоступен. Восстанови аккаунт сохранённым кодом." else null
         )
     )
     val state = _state.asStateFlow()
@@ -93,7 +70,9 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         }
         val changed = store.readServerUrl() != normalized
         if (changed) QueueWatchService.stop(getApplication<Application>())
-        store.writeServerUrl(normalized)
+        try { store.writeServerUrl(normalized) } catch(e: Exception) {
+            _state.update { it.copy(message=e.message ?: "Не удалось сохранить сервер") }; return
+        }
         _state.update { it.copy(serverUrl = normalized,
             hasOnlineAccount = if (changed) false else it.hasOnlineAccount,
             onlineStatus = if (changed) null else it.onlineStatus,
@@ -142,6 +121,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             val fingerprint = fingerprint(saved)
             var token = store.readServerToken()
             if (token.isBlank()) {
+                check(!store.credentialUnavailable()) { "Сначала восстанови существующий аккаунт в настройках" }
                 val response = api.register(saved)
                 token = response.getString("token")
                 store.writeServerToken(token)
@@ -200,7 +180,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
                 throw error
             } catch (error: Exception) {
                 if (error is RemoteException && error.statusCode == 401 && store.readServerToken().isNotBlank()) {
-                    store.clearCredentials()
+                    runCatching { store.clearCredentials() }
                     QueueWatchService.stop(getApplication<Application>())
                     _state.update { it.copy(hasOnlineAccount=false, onlineStatus=null, onlineQueue=null, onlineEvidenceCount=0, onlineResults=null, personalStats=null, community=null, club=null, sessions=null, foundPlayer=null, ocrSuggestions=null,inbox=null,discoverable=null,recoveryCode=null) }
                 }
@@ -280,7 +260,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         val queue = api.state(token).toOnlineQueueState()
         _state.update { it.copy(onlineQueue = queue, message = when(response.optString("status")) {
             "CLOSED" -> "Результат подтверждён"
-            "DISPUTED" -> "Результаты не совпали. Требуется решение модератора"
+            "DISPUTED" -> "Результат требует проверки модератора"
             else -> "Результат отправлен. Ожидаем второго капитана"
         }) }
     }
@@ -321,49 +301,22 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(ocrSuggestions = suggestions, message = "Распознавание завершено. Проверь значения по оригиналу.") }
     }
 
-    private fun communityAction(action: (RemoteClient, String) -> Unit = { _, _ -> }) = onlineAction {
-        val token = store.readServerToken()
-        if (token.isBlank()) return@onlineAction
-        val api = RemoteClient(store.readServerUrl())
-        action(api, token)
-        val data = api.community(token)
-        val sessions = api.sessions(token)
-        _state.update { it.copy(community = data, sessions = sessions, foundPlayer = null) }
-    }
-    fun loadCommunity() = communityAction()
-    fun findCommunityPlayer(riotId: String) = onlineAction {
-        _state.update { it.copy(foundPlayer = null) }
-        val player = RemoteClient(store.readServerUrl()).findPlayer(store.readServerToken(), riotId.trim())
-        _state.update { it.copy(foundPlayer = player) }
-    }
-    fun requestFriend(id: String) = communityAction { api, token -> api.requestFriend(token,id) }
-    fun changeFriend(id: String, accept: Boolean) = communityAction { api, token -> api.friendAction(token,id,accept) }
-    fun inviteFriend(id: String, session: String) = communityAction { api, token ->
-        api.inviteFriend(token,id,session)
-        _state.update { it.copy(message = "Приглашение отправлено") }
-    }
-    fun dismissInvite(id: String) = communityAction { api, token -> api.dismissInvite(token,id) }
-    fun sendComplaint(match: String, id: String, category: String, note: String) = communityAction { api, token ->
-        api.complain(token,match,id,category,note)
-        _state.update { it.copy(message = "Жалоба отправлена модератору") }
-    }
-
-    private fun clubAction(action:(RemoteClient,String)->Unit={_,_->}) = onlineAction {
-        val token=store.readServerToken()
-        if(token.isBlank()) return@onlineAction
-        val api=RemoteClient(store.readServerUrl())
-        action(api,token)
-        val club=api.competitive(token)
-        _state.update { it.copy(club=club) }
-    }
-    fun loadClub()=clubAction()
-    fun createClubTeam(name:String)=clubAction { api,t -> api.createClubTeam(t,name) }
-    fun inviteClubMember(riotId:String)=clubAction { api,t -> api.inviteClubMember(t,riotId); _state.update { it.copy(message="Приглашение отправлено") } }
-    fun clubInviteAction(id:String,accept:Boolean)=clubAction { api,t -> api.clubInviteAction(t,id,accept) }
-    fun leaveClubTeam()=clubAction { api,t -> api.leaveClubTeam(t) }
-    fun clubMemberAction(id:String,transfer:Boolean)=clubAction { api,t -> api.clubMemberAction(t,id,transfer) }
-    fun createClubChallenge(opponent:String,season:String,starts:Long)=clubAction { api,t -> api.createClubChallenge(t,opponent,season,starts) }
-    fun clubChallengeAction(id:String,accept:Boolean)=clubAction { api,t -> api.clubChallengeAction(t,id,accept) }
+    private val socialActions by lazy { CommunityActions(store,_state) { block -> onlineAction(block=block) } }
+    fun loadCommunity()=socialActions.loadCommunity()
+    fun findCommunityPlayer(riotId:String)=socialActions.findCommunityPlayer(riotId)
+    fun requestFriend(id:String)=socialActions.requestFriend(id)
+    fun changeFriend(id:String,accept:Boolean)=socialActions.changeFriend(id,accept)
+    fun inviteFriend(id:String,session:String)=socialActions.inviteFriend(id,session)
+    fun dismissInvite(id:String)=socialActions.dismissInvite(id)
+    fun sendComplaint(match:String,id:String,category:String,note:String)=socialActions.sendComplaint(match,id,category,note)
+    fun loadClub()=socialActions.loadClub()
+    fun createClubTeam(name:String)=socialActions.createClubTeam(name)
+    fun inviteClubMember(riotId:String)=socialActions.inviteClubMember(riotId)
+    fun clubInviteAction(id:String,accept:Boolean)=socialActions.clubInviteAction(id,accept)
+    fun leaveClubTeam()=socialActions.leaveClubTeam()
+    fun clubMemberAction(id:String,transfer:Boolean)=socialActions.clubMemberAction(id,transfer)
+    fun createClubChallenge(opponent:String,season:String,starts:Long)=socialActions.createClubChallenge(opponent,season,starts)
+    fun clubChallengeAction(id:String,accept:Boolean)=socialActions.clubChallengeAction(id,accept)
 
     fun loadAccountSettings()=onlineAction {
         val token=store.readServerToken()
@@ -395,7 +348,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
     fun disconnectAccount(){
         if(state.value.onlineBusy)return
         QueueWatchService.stop(getApplication<Application>())
-        store.clearCredentials()
+        try { store.clearCredentials() } catch(e:Exception) { _state.update {it.copy(message=e.message ?: "Не удалось отключить аккаунт")};return }
         _state.update {it.copy(hasOnlineAccount=false,onlineStatus=null,onlineEvidenceCount=0,onlineQueue=null,onlineResults=null,personalStats=null,sessions=null,community=null,club=null,foundPlayer=null,ocrSuggestions=null,inbox=null,discoverable=null,recoveryCode=null,message="Аккаунт отключён на этом устройстве")}
     }
     fun setDiscoverable(value:Boolean)=onlineAction {

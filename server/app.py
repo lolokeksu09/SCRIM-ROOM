@@ -32,6 +32,7 @@ from server.match_intelligence import enrich_candidates, save_quality, load_qual
 from server.ocr import recognize_stats, OcrUnavailable
 from server.competition_guard import reserved_players, enforce_reservations, check_fixture_conflict
 from server.result_guard import review_reason, result_review_reason
+from server.moderator_auth import ModeratorCredentials
 
 RANK_VALUES = {'BELOW_MASTER': 0, 'MASTER': 1, 'GRANDMASTER': 2, 'CHALLENGER': 3, 'SOVEREIGN': 4}
 RANK_SEEDS = {'GRANDMASTER': 1600, 'CHALLENGER': 1800, 'SOVEREIGN': 2000}
@@ -479,10 +480,11 @@ def _read_safe_image(content: bytes) -> bytes:
         raise HTTPException(422, 'Файл не является изображением') from None
 
 
-def create_app(db_path: str, admin_key: str | None = None, registration_open: bool = True, strict_results: bool = False):
+def create_app(db_path: str, admin_key: str | None = None, registration_open: bool = True, strict_results: bool = False, moderator_hashes: dict[str,str] | None = None):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
+    moderators=ModeratorCredentials(admin_key,moderator_hashes or {})
     @asynccontextmanager
     async def lifespan(app):
         async def loop():
@@ -499,7 +501,7 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
             task.cancel()
             try: await task
             except asyncio.CancelledError: pass
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.4', docs_url=None, redoc_url=None, openapi_url=None,lifespan=lifespan)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.5', docs_url=None, redoc_url=None, openapi_url=None,lifespan=lifespan)
     app.add_middleware(RequestBodyLimit)
     with store.transaction(write=True) as db:
         db.execute('CREATE TABLE IF NOT EXISTS result_review_flags(match_id TEXT PRIMARY KEY REFERENCES matches(id),reason TEXT NOT NULL)')
@@ -530,9 +532,10 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
         return authorization[7:]
 
     def admin_auth(request: Request,x_admin_key: str | None = Header(default=None)):
-        if not admin_key or len(admin_key) < 32 or not x_admin_key or not hmac.compare_digest(x_admin_key.encode('utf-8'), admin_key.encode('utf-8')):
-            raise HTTPException(403, 'Нет доступа администратора')
+        actor=moderators.authenticate(x_admin_key)
+        if actor is None: raise HTTPException(403,'Нет доступа администратора')
         request.state.admin_authorized=True
+        request.state.admin_actor=actor
 
     admin_dir = Path(__file__).resolve().parent / 'admin'
 
@@ -982,4 +985,5 @@ def create_app(db_path: str, admin_key: str | None = None, registration_open: bo
 app = create_app(os.environ.get('SCRIM_DB_PATH','/tmp/scrim-room-pilot.db'),
                  admin_key=os.environ.get('SCRIM_ADMIN_KEY'),
                  registration_open=os.environ.get('SCRIM_REGISTRATION_OPEN','1')=='1',
-                 strict_results=True)
+                 strict_results=True,
+                 moderator_hashes=ModeratorCredentials.from_environment())

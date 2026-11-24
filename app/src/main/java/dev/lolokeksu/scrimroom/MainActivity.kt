@@ -85,7 +85,8 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
     val tab = Tab.entries.firstOrNull { it.name == tabName } ?: Tab.HOME
     val snackbar = remember { SnackbarHostState() }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
-    val onlineAvailable = !intro && state.serverUrl.isNotBlank() && state.hasOnlineAccount
+    val watching by QueueWatchService.running.collectAsStateWithLifecycle()
+    val onlineAvailable = !intro && !watching && state.serverUrl.isNotBlank() && state.hasOnlineAccount
     LaunchedEffect(lifecycle, onlineAvailable, state.serverUrl) {
         if (onlineAvailable) lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             while (isActive) {

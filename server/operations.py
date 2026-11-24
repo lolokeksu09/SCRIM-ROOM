@@ -26,7 +26,7 @@ def audit_request(store,request,status,stamp):
     resource=','.join(v for v in request.path_params.values() if isinstance(v,str) and len(v)==32 and all(ch in '0123456789abcdef' for ch in v))
     try:
         with store.transaction(write=True) as db:
-            db.execute('INSERT INTO admin_audit(at,method,route,resource,status) VALUES(?,?,?,?,?)',(stamp,request.method,route,resource,status))
+            db.execute('INSERT INTO admin_audit(at,method,route,resource,status,actor) VALUES(?,?,?,?,?,?)',(stamp,request.method,route,resource,status,getattr(request.state,'admin_actor','legacy')))
             db.execute('DELETE FROM admin_audit WHERE at<?',(stamp-90*86400,))
     except sqlite3.Error:
         # Do not misreport an already committed mutation as failed.
@@ -69,6 +69,8 @@ def install_operations(app,store,token_header,admin_auth,limit,get_user,now,acco
         CREATE TABLE IF NOT EXISTS admin_audit(id INTEGER PRIMARY KEY,at INTEGER NOT NULL,method TEXT NOT NULL,route TEXT NOT NULL,resource TEXT NOT NULL,status INTEGER NOT NULL);
         CREATE INDEX IF NOT EXISTS admin_audit_at ON admin_audit(at);
         """)
+        if "actor" not in {row["name"] for row in db.execute("PRAGMA table_info(admin_audit)")}:
+            db.execute("ALTER TABLE admin_audit ADD COLUMN actor TEXT NOT NULL DEFAULT 'legacy'")
 
     @app.post('/v1/me/recovery')
     def issue_recovery(token=Depends(token_header)):
@@ -132,5 +134,5 @@ def install_operations(app,store,token_header,admin_auth,limit,get_user,now,acco
             counts={}
             for table in ('accounts','queue','matches','club_teams','complaints'):
                 counts[table]=db.execute('SELECT count(*) FROM '+table).fetchone()[0]
-            audits=[dict(r) for r in db.execute('SELECT at,method,route,resource,status FROM admin_audit ORDER BY id DESC LIMIT 100')]
+            audits=[dict(r) for r in db.execute('SELECT at,method,route,resource,status,actor FROM admin_audit ORDER BY id DESC LIMIT 100')]
             return {'database':'ready','counts':counts,'audit':audits}

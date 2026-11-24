@@ -14,6 +14,8 @@ import org.json.JSONObject
 class LocalStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences("scrim_room_v1", Context.MODE_PRIVATE)
 
+    private val credentials = CredentialStore(prefs)
+
     private inline fun <reified T : Enum<T>> safeEnum(value: String?, fallback: T): T =
         enumValues<T>().firstOrNull { it.name == value } ?: fallback
 
@@ -58,16 +60,13 @@ class LocalStore(context: Context) {
 
     /** Switching server invalidates credentials to avoid accidentally sending them to another host. */
     fun writeServerUrl(newUrl: String) {
-        if (newUrl != readServerUrl()) {
-            prefs.edit().putString("server_url", newUrl).remove("server_token")
-                .remove("submitted_fingerprint").remove("uploaded_uris").apply()
-        }
+        credentials.switchServer(newUrl)
     }
 
-    fun readServerToken(): String = prefs.getString("server_token", "") ?: ""
-    fun writeServerToken(value: String) { prefs.edit().putString("server_token", value).apply() }
-
-    fun clearCredentials() { prefs.edit().remove("server_token").remove("submitted_fingerprint").remove("uploaded_uris").apply() }
+    fun readServerToken(): String = credentials.read()
+    fun writeServerToken(value: String) { credentials.write(value) }
+    fun credentialUnavailable(): Boolean = credentials.unavailable()
+    fun clearCredentials() { credentials.clear() }
 
     fun readSubmittedFingerprint(): String = prefs.getString("submitted_fingerprint", "") ?: ""
     fun writeSubmittedFingerprint(value: String) { prefs.edit().putString("submitted_fingerprint", value).apply() }
