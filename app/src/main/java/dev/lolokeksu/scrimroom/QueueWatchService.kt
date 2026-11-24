@@ -73,7 +73,7 @@ class QueueWatchService: Service() {
                     }
                     delay(5000)
                 }
-            }finally{stopSelf(startId)}
+            }finally{stopSelf()}
         }
         return START_NOT_STICKY
     }

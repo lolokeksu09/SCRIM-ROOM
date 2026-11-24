@@ -3,6 +3,7 @@ import argparse
 import os
 import sqlite3
 import tempfile
+from contextlib import closing
 from pathlib import Path
 
 def backup(source,destination):
@@ -14,7 +15,7 @@ def backup(source,destination):
     fd,tmp=tempfile.mkstemp(prefix='.scrim-backup-',dir=dest.parent)
     os.close(fd)
     try:
-        with sqlite3.connect(src.as_uri()+'?mode=ro',uri=True) as a, sqlite3.connect(tmp) as b:
+        with closing(sqlite3.connect(src.as_uri()+'?mode=ro',uri=True)) as a, closing(sqlite3.connect(tmp)) as b:
             a.backup(b)
             if b.execute('PRAGMA quick_check').fetchall()!=[('ok',)]: raise RuntimeError('Backup integrity check failed')
         # Hard-link publication refuses an existing destination atomically.

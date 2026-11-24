@@ -210,6 +210,22 @@ class RemoteClientIntegrationTest {
             api.leave(tokens.last())
             api.join(tokens.last(),sessionId)
             assertNotNull(api.state(tokens.first()).toOnlineQueueState().match)
+            // Recovery retains account identity, privacy and assigned match.
+            assertTrue(api.discoverable(firstToken))
+            assertFalse(api.setDiscoverable(firstToken,false))
+            assertFalse(api.discoverable(firstToken))
+            val unread=api.inbox(firstToken).filter{!it.read}
+            assertTrue(unread.isNotEmpty())
+            api.readInbox(firstToken,unread.map{it.id})
+            assertTrue(api.inbox(firstToken).all{it.read})
+            val code=api.issueRecovery(firstToken)
+            val recovered=api.recover(code)
+            val replacement=recovered.getString("token")
+            assertEquals(firstId,recovered.getJSONObject("account").getString("id"))
+            assertFalse(api.discoverable(replacement))
+            assertNotNull(api.state(replacement).toOnlineQueueState().match)
+            assertEquals(401,(runCatching{api.account(firstToken)}.exceptionOrNull() as? RemoteException)?.statusCode)
+            assertEquals(401,(runCatching{api.recover(code)}.exceptionOrNull() as? RemoteException)?.statusCode)
         } finally {
             HttpsURLConnection.setDefaultSSLSocketFactory(original)
             images.forEach { resolver.delete(it, null, null) }
