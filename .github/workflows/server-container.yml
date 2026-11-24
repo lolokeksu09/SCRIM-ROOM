@@ -1,0 +1,34 @@
+name: Server container smoke tests
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  container-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      SCRIM_ADMIN_KEY: ci-only-scrim-container-key-32-characters-minimum
+      COMPOSE_PROJECT_NAME: scrim-ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build, start and check closed registration
+        run: |
+          set -euo pipefail
+          docker compose -f server/compose.yml up -d --build --wait
+          curl -fsS http://127.0.0.1:8765/readyz
+          curl -fsS http://127.0.0.1:8765/v1/public/config | python -c 'import json,sys; assert json.load(sys.stdin)["registration_open"] is False'
+      - name: Verify persistence and consistent backup
+        run: |
+          set -euo pipefail
+          SCRIM_REGISTRATION_OPEN=1 docker compose -f server/compose.yml up -d --wait
+          python .github/scripts/container-smoke.py create
+          docker compose -f server/compose.yml exec -T scrim-api python -m server.backup /data/backups/ci.sqlite3
+          docker compose -f server/compose.yml exec -T scrim-api python -c 'import sqlite3; c=sqlite3.connect("/data/backups/ci.sqlite3"); assert c.execute("pragma integrity_check").fetchone()[0]=="ok"; assert c.execute("select count(*) from accounts").fetchone()[0]==1'
+          SCRIM_REGISTRATION_OPEN=0 docker compose -f server/compose.yml up -d --wait
+          python .github/scripts/container-smoke.py verify
+      - name: Remove disposable CI containers and volume
+        if: always()
+        run: docker compose -f server/compose.yml down -v

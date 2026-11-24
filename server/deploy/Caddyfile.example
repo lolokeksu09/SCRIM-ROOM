@@ -2,5 +2,8 @@
 # Do not overwrite the existing Ventry Caddy configuration.
 # YOUR_SCRIM_SUBDOMAIN.example.com {
 #     encode zstd gzip
+#     request_body {
+#         max_size 4259840
+#     }
 #     reverse_proxy 127.0.0.1:8765
 # }

@@ -3,12 +3,23 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 jobs:
   signed-apk:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      - name: Require green CI on this exact revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in android-debug.yml android-emulator-tests.yml admin-browser.yml server-container.yml; do
+            result="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/runs?head_sha=$GITHUB_SHA&branch=main&per_page=20" --jq '.workflow_runs | map(select(.event == "push" or .event == "workflow_dispatch")) | first | .conclusion // "missing"')"
+            test "$result" = success || { echo "Release blocked: $workflow = $result"; exit 1; }
+          done
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:

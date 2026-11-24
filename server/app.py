@@ -20,7 +20,9 @@ from typing import Literal
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, Request
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import Response, FileResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from server.request_guard import RequestBodyLimit
 from pydantic import BaseModel, Field, field_validator, model_validator
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -431,11 +433,17 @@ def _read_safe_image(content: bytes) -> bytes:
         raise HTTPException(422, 'Файл не является изображением') from None
 
 
-def create_app(db_path: str, admin_key: str | None = None):
+def create_app(db_path: str, admin_key: str | None = None, registration_open: bool = True):
     os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
     store = Database(db_path)
     admin_key = admin_key or ''
-    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.1', docs_url=None, redoc_url=None)
+    app = FastAPI(title='SCRIM ROOM Private Match API', version='1.0.0-rc.2', docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_middleware(RequestBodyLimit)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        # Do not reflect submitted secrets or arbitrary user payloads in error bodies.
+        return JSONResponse({'detail':'Некорректные данные запроса'},status_code=422,headers={'Cache-Control':'no-store'})
 
     def limit(scope, identity, maximum, period):
         stamp=now_ts()
@@ -454,7 +462,7 @@ def create_app(db_path: str, admin_key: str | None = None):
         return authorization[7:]
 
     def admin_auth(request: Request,x_admin_key: str | None = Header(default=None)):
-        if not admin_key or len(admin_key) < 32 or not x_admin_key or not hmac.compare_digest(x_admin_key, admin_key):
+        if not admin_key or len(admin_key) < 32 or not x_admin_key or not hmac.compare_digest(x_admin_key.encode('utf-8'), admin_key.encode('utf-8')):
             raise HTTPException(403, 'Нет доступа администратора')
         request.state.admin_authorized=True
 
@@ -492,8 +500,14 @@ def create_app(db_path: str, admin_key: str | None = None):
     def healthz():
         return {'status':'ok'}
 
+    @app.get('/v1/public/config')
+    def public_config():
+        return {'registration_open':registration_open,'version':app.version}
+
     @app.post('/v1/accounts', status_code=201)
     def create_account(payload: ProfileIn, request: Request):
+        if not registration_open:
+            raise HTTPException(403,'Регистрация временно закрыта организатором')
         limit('registration',request.client.host if request.client else 'unknown',30,3600)
         token = secrets.token_urlsafe(32)
         ident = uuid.uuid4().hex
@@ -877,4 +891,5 @@ def create_app(db_path: str, admin_key: str | None = None):
 
 
 app = create_app(os.environ.get('SCRIM_DB_PATH','/tmp/scrim-room-pilot.db'),
-                 admin_key=os.environ.get('SCRIM_ADMIN_KEY'))
+                 admin_key=os.environ.get('SCRIM_ADMIN_KEY'),
+                 registration_open=os.environ.get('SCRIM_REGISTRATION_OPEN','1')=='1')

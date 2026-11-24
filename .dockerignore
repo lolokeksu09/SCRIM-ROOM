@@ -11,3 +11,12 @@
 **/.env
 **/build
 *.zip
+
+**/*.jks
+**/*.keystore
+**/*.p12
+**/*.pem
+**/*.key
+**/*.sqlite3-wal
+**/*.sqlite3-shm
+**/backups

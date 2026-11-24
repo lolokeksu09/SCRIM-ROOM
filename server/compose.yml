@@ -7,6 +7,7 @@ services:
     environment:
       SCRIM_DB_PATH: /data/scrim.sqlite3
       SCRIM_ADMIN_KEY: ${SCRIM_ADMIN_KEY:?Define a secret admin key with 32+ characters}
+      SCRIM_REGISTRATION_OPEN: ${SCRIM_REGISTRATION_OPEN:-0}
     ports:
       - '127.0.0.1:8765:8080'
     volumes:

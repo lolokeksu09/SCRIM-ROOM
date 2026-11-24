@@ -1,4 +1,4 @@
-# SCRIM ROOM 1.0.0-rc.1 — release gate
+# SCRIM ROOM 1.0.0-rc.2 — release gate
 
 This is an invited-club release candidate, not a public launch.
 
@@ -34,3 +34,6 @@ curl --fail --silent http://127.0.0.1:8765/readyz
 Configure only the dedicated Caddy virtual host using server/deploy/Caddyfile.example, validate before reload, confirm external HTTPS /readyz and /admin. Do not expose the administrator key in logs or commit it. No live deployment is performed by this document.
 
 Before each upgrade, run the backup CLI described in README; record source revision, image ID, backup checksum, integrity and restore test. Revert to prior image only if schema compatibility is confirmed; restoring old DB loses newer writes and may resurrect tokens. No destructive rollback is automatic.
+
+## RC.2 safeguards
+Compose defaults to closed registration (`SCRIM_REGISTRATION_OPEN=0`); existing accounts and recovery remain available. Set the variable to `1` only for an authorized intake window, recreate the service, then close registration again. This is not an invitation-code system; account ownership remains a manual gate. Request bodies are bounded before JSON/multipart parsing (32 KiB normal, 4 MiB + 64 KiB multipart for evidence). Validation errors do not reflect submitted input. OpenAPI is disabled. Release workflow requires successful debug/API, emulator, browser and container workflows on the exact commit before signing. Container CI runs on disposable test data only; it does not touch the VDS.

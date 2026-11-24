@@ -1,4 +1,4 @@
-# SCRIM ROOM — 1.0.0-rc.1
+# SCRIM ROOM — 1.0.0-rc.2
 
 **Independent organizer for private Wild Rift custom games.** Not affiliated with Riot Games. Does not provide a public alternative ranked ladder or access Riot's matchmaker. Only locally assigned rating seeds for balancing private teams, **not Riot MMR**.
 
@@ -149,3 +149,6 @@ Run inside the server container as the service owner: `python -m server.backup /
 Three first-run intro pages, state-based home, grouped navigation, replayable introduction, back navigation and improved text scaling on action buttons. Concurrent user requests now report a busy state instead of silently dropping actions. Docker readiness and resource restrictions are configured. Manual release workflow requires an existing trusted release key and its independently recorded certificate fingerprint; debug artifacts are not release builds. See [release gate and deployment runbook](docs/RELEASE-RC.md). Not yet a production deployment.
 
 Queue presence: an idle waiting entry expires after 90 seconds without authenticated queue state/join traffic; no disciplinary penalty and no automatic rejoin. Existing pre-RC queue entries use their original joined_at until touched. Assigned matches are not cancelled by this lease. Cleanup is lazy on queue/session operations.
+
+## 1.0.0-rc.2 — release hardening
+Closed-by-default registration in Docker; bounded request bodies; no reflected validation input or exposed OpenAPI schema; exact-revision CI gates for signed releases; disposable Docker deployment, backup and persistence smoke workflow. Set SCRIM_REGISTRATION_OPEN=1 explicitly for an intake window. No live deployment or release signing claimed.
