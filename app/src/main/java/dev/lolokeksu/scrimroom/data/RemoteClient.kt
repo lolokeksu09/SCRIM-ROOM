@@ -95,9 +95,28 @@ class RemoteClient(baseInput: String) {
         return (0 until rows.length()).map { i ->
             val row = rows.getJSONObject(i)
             OnlineResult(row.getString("match_id"), row.getString("winner"), row.getString("side"),
-                row.getLong("resolved_at"))
+                row.getLong("resolved_at"), row.optString("role"))
         }
     }
+
+    fun setLobby(token: String, matchId: String, room: String) =
+        jsonRequest("PUT", "/v1/matches/${Uri.encode(matchId)}/lobby", token, JSONObject().put("room",room))
+    fun arriveLobby(token: String, matchId: String) =
+        jsonRequest("POST", "/v1/matches/${Uri.encode(matchId)}/lobby/arrive", token)
+    fun statistics(token: String): PersonalStats {
+        val obj = jsonRequest("GET","/v1/me/statistics",token)
+        val calibration = obj.getJSONObject("calibration")
+        val roles = obj.getJSONObject("roles")
+        return PersonalStats(obj.getInt("played"),obj.getInt("wins"),obj.getInt("losses"),obj.getInt("voids"),
+            if (obj.isNull("win_rate")) null else obj.getDouble("win_rate"),
+            calibration.getInt("completed"),calibration.getInt("target"),
+            listOf("BARON","JUNGLE","MID","DRAGON","SUPPORT").map { role ->
+                val row=roles.getJSONObject(role)
+                RoleStats(role,row.getInt("played"),row.getInt("wins"),row.getInt("losses"))
+            })
+    }
+    fun uploadResultEvidence(token: String, matchId: String, resolver: ContentResolver, uri: Uri) =
+        uploadImage(token,resolver,uri,"/v1/matches/${Uri.encode(matchId)}/evidence")
 
     fun recognizeEvidence(token: String, slot: Int): OcrSuggestions {
         val obj = jsonRequest("POST", "/v1/me/evidence/$slot/ocr", token).getJSONObject("suggestions")
@@ -128,7 +147,9 @@ class RemoteClient(baseInput: String) {
     fun complain(token: String, matchId: String, id: String, category: String, note: String) = jsonRequest("POST", "/v1/community/reports", token,
         JSONObject().put("match_id", matchId).put("account_id", id).put("category", category).put("note", note))
 
-    fun uploadEvidence(token: String, resolver: ContentResolver, uri: Uri): JSONObject {
+    fun uploadEvidence(token: String, resolver: ContentResolver, uri: Uri): JSONObject = uploadImage(token,resolver,uri,"/v1/me/evidence")
+
+    private fun uploadImage(token: String, resolver: ContentResolver, uri: Uri, path: String): JSONObject {
         val mime = resolver.getType(uri)
         require(mime in setOf("image/png", "image/jpeg", "image/webp")) {
             "Поддерживаются скриншоты PNG, JPEG и WEBP"
@@ -145,7 +166,7 @@ class RemoteClient(baseInput: String) {
             buffer.toByteArray()
         } ?: error("Не удалось открыть скриншот")
         val boundary = "ScrimUpload" + UUID.randomUUID().toString().replace("-", "")
-        val connection = open("POST", "/v1/me/evidence", token)
+        val connection = open("POST", path, token)
         connection.doOutput = true
         connection.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
         connection.outputStream.use { output ->
@@ -184,10 +205,21 @@ data class OnlineMatch(
     val red: List<OnlinePlayer>,
     val isCaptain: Boolean = false,
     val ownReport: String? = null,
-    val reportCount: Int = 0
+    val reportCount: Int = 0,
+    val ownReady: Boolean = false,
+    val serverNow: Long = 0,
+    val receivedElapsed: Long = android.os.SystemClock.elapsedRealtime(),
+    val lobbyHost: Boolean = false,
+    val lobbyRoom: String? = null,
+    val lobbyArrivals: Int = 0,
+    val ownArrived: Boolean = false,
+    val ownEvidence: Boolean = false,
+    val evidenceCount: Int = 0
 )
 
-data class OnlineResult(val id: String, val winner: String, val side: String, val resolvedAt: Long)
+data class OnlineResult(val id: String, val winner: String, val side: String, val resolvedAt: Long, val role: String = "")
+data class RoleStats(val role: String,val played: Int,val wins: Int,val losses: Int)
+data class PersonalStats(val played: Int,val wins: Int,val losses: Int,val voids: Int,val winRate: Double?,val calibrated: Int,val target: Int,val roles: List<RoleStats>)
 
 data class OcrSuggestions(val slot: Int, val matches: Int?, val winRate: Double?, val kda: Double?, val ranks: List<String>)
 
@@ -216,7 +248,11 @@ fun JSONObject.toOnlineQueueState(): OnlineQueueState {
         (matchObj.optJSONArray("blue") ?: org.json.JSONArray()).toPlayers(),
         (matchObj.optJSONArray("red") ?: org.json.JSONArray()).toPlayers(),
         matchObj.optBoolean("is_captain"), matchObj.optString("own_report").takeUnless { it.isBlank() || it == "null" },
-        matchObj.optInt("report_count")
+        matchObj.optInt("report_count"), matchObj.optBoolean("own_ready"), matchObj.optLong("server_now"),
+        android.os.SystemClock.elapsedRealtime(), matchObj.optBoolean("lobby_host"),
+        matchObj.optString("lobby_room").takeUnless { it.isBlank() || it == "null" },
+        matchObj.optInt("lobby_arrivals"), matchObj.optBoolean("own_arrived"), matchObj.optBoolean("own_evidence"),
+        matchObj.optJSONArray("evidence_sides")?.length() ?: 0
     )
     return OnlineQueueState(optString("account_status"), optBoolean("queued"),
         optInt("waiting_in_region"), match, optJSONObject("discipline")?.optInt("incidents") ?: 0,

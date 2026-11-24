@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import dev.lolokeksu.scrimroom.data.LocalStore
 import dev.lolokeksu.scrimroom.data.OnlineQueueState
 import dev.lolokeksu.scrimroom.data.OnlineResult
+import dev.lolokeksu.scrimroom.data.PersonalStats
 import dev.lolokeksu.scrimroom.data.PlaySession
 import dev.lolokeksu.scrimroom.data.CommunityData
 import dev.lolokeksu.scrimroom.data.SocialPlayer
@@ -43,6 +44,7 @@ data class ScrimUiState(
     val onlineEvidenceCount: Int = 0,
     val onlineQueue: OnlineQueueState? = null,
     val onlineResults: List<OnlineResult>? = null,
+    val personalStats: PersonalStats? = null,
     val sessions: List<PlaySession>? = null,
     val community: CommunityData? = null,
     val foundPlayer: SocialPlayer? = null,
@@ -86,6 +88,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             onlineStatus = if (changed) null else it.onlineStatus,
             onlineQueue = if (changed) null else it.onlineQueue,
             onlineResults = if (changed) null else it.onlineResults,
+            personalStats = if (changed) null else it.personalStats,
             sessions = if (changed) null else it.sessions,
             community = if (changed) null else it.community,
             foundPlayer = if (changed) null else it.foundPlayer,
@@ -262,8 +265,29 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
     fun loadOnlineResults() = onlineAction {
         val token = store.readServerToken()
         if (token.isBlank()) return@onlineAction
-        val results = RemoteClient(store.readServerUrl()).results(token)
-        _state.update { it.copy(onlineResults = results) }
+        val api = RemoteClient(store.readServerUrl())
+        val results = api.results(token)
+        val stats = api.statistics(token)
+        _state.update { it.copy(onlineResults = results,personalStats = stats) }
+    }
+
+    fun setLobby(matchId: String, room: String) = onlineAction {
+        val api = RemoteClient(store.readServerUrl())
+        val token = store.readServerToken()
+        api.setLobby(token,matchId,room.trim())
+        _state.update { it.copy(onlineQueue=api.state(token).toOnlineQueueState(),message="Лобби сохранено") }
+    }
+    fun arriveLobby(matchId: String) = onlineAction {
+        val api = RemoteClient(store.readServerUrl())
+        val token = store.readServerToken()
+        api.arriveLobby(token,matchId)
+        _state.update { it.copy(onlineQueue=api.state(token).toOnlineQueueState()) }
+    }
+    fun uploadResultEvidence(matchId: String, uri: Uri) = onlineAction {
+        val api = RemoteClient(store.readServerUrl())
+        val token = store.readServerToken()
+        api.uploadResultEvidence(token,matchId,getApplication<Application>().contentResolver,uri)
+        _state.update { it.copy(onlineQueue=api.state(token).toOnlineQueueState(),message="Скриншот результата сохранён") }
     }
 
     fun recognizeEvidence(slot: Int) = onlineAction {

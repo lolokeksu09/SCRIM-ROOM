@@ -507,19 +507,59 @@ fun SessionsScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Uni
 
 @Composable
 private fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boolean) {
+    var remaining by remember(match.id,match.serverNow,match.receivedElapsed) { mutableStateOf((match.deadline-match.serverNow).coerceAtLeast(0)) }
+    LaunchedEffect(match.id,match.deadline,match.serverNow,match.receivedElapsed,match.status) {
+        if (match.status=="READY_CHECK" && match.serverNow>0) {
+            while (isActive) {
+                val elapsed=(android.os.SystemClock.elapsedRealtime()-match.receivedElapsed)/1000
+                remaining=(match.deadline-match.serverNow-elapsed).coerceAtLeast(0)
+                if (remaining==0L) break
+                delay(250)
+            }
+        }
+    }
+    var room by remember(match.id,match.lobbyRoom) { mutableStateOf(match.lobbyRoom.orEmpty()) }
+    var proofUri by remember(match.id) { mutableStateOf<android.net.Uri?>(null) }
+    val resultPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> proofUri=uri }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text(when(match.status) { "READY_CHECK" -> "Матч найден · подтверждение"; "DISPUTED" -> "Результат оспаривается"; else -> "Матч подтверждён" },
             fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Text("Готово игроков: ${match.readyCount}/10", color = Accent, fontSize = 13.sp)
         if (match.status == "READY_CHECK") {
             Text("Подтверди готовность в течение трёх минут после создания матча. Если не все ответят, матч отменится.", color = Muted, fontSize = 12.sp)
-            PrimaryAction("Я готов", enabled = !busy) { vm.readyOnlineMatch(match.id) }
-            SecondaryAction("Отказаться", enabled = !busy) { vm.declineOnlineMatch(match.id) }
+            if (match.serverNow>0) Text(String.format(Locale.ROOT,"%02d:%02d",remaining/60,remaining%60), color = if (remaining<=20) Red else Accent, fontWeight = FontWeight.Black, fontSize = 32.sp)
+            PrimaryAction(if (match.ownReady) "Готовность подтверждена" else "Я готов", enabled = !busy && !match.ownReady && (match.serverNow==0L || remaining>0)) { vm.readyOnlineMatch(match.id) }
+            SecondaryAction("Отказаться", enabled = !busy && (match.serverNow==0L || remaining>0)) { vm.declineOnlineMatch(match.id) }
+        }
+        if (match.status == "ACTIVE") {
+            Eyebrow("Игровое лобби")
+            Text("Капитан синих создаёт комнату в Wild Rift вручную. Не вводи пароль Riot или ссылку.", color = Muted, fontSize = 12.sp)
+            if (match.lobbyHost && match.lobbyArrivals == 0) {
+                OutlinedTextField(room,{room=it.take(64)},label={Text("Название комнаты")},singleLine=true,modifier=Modifier.fillMaxWidth())
+                SecondaryAction("Сохранить лобби",enabled=!busy && room.trim().length>=3) { vm.setLobby(match.id,room) }
+            }
+            Text(match.lobbyRoom ?: "Ожидаем название комнаты",fontWeight=FontWeight.Bold)
+            Text("Отметились в лобби: ${match.lobbyArrivals}/10",color=Accent,fontSize=13.sp)
+            if (match.lobbyRoom != null) PrimaryAction(if(match.ownArrived) "Вход отмечен" else "Я в лобби",enabled=!busy && !match.ownArrived) { vm.arriveLobby(match.id) }
         }
         OnlineTeamPanel("Синяя команда", match.blue, Blue)
         OnlineTeamPanel("Красная команда", match.red, Red)
+        if (match.status in listOf("ACTIVE","DISPUTED") && match.isCaptain) {
+            Eyebrow("Доказательство результата")
+            Text("Скриншотов от капитанов: ${match.evidenceCount}/2. Скриншот доступен модератору, не подтверждает результат автоматически.",color=Muted,fontSize=12.sp)
+            if (match.ownEvidence) StatusPill("Скриншот сохранён",active=true)
+            else {
+                SecondaryAction("Выбрать скриншот результата",enabled=!busy) { resultPicker.launch(arrayOf("image/png","image/jpeg","image/webp")) }
+                proofUri?.let { uri ->
+                    AlertDialog(onDismissRequest={proofUri=null},title={Text("Отправить скриншот?")},
+                        text={Text("Изображение будет доступно модератору. После отправки его нельзя заменить. Проверь, что на снимке нет личных данных.")},
+                        confirmButton={TextButton(onClick={proofUri=null;vm.uploadResultEvidence(match.id,uri)},enabled=!busy){Text("Отправить")}},
+                        dismissButton={TextButton(onClick={proofUri=null}){Text("Отмена")}})
+                }
+            }
+        }
         if (match.status == "ACTIVE") {
-            Text("Создайте пользовательское лобби вручную. После игры капитаны барон-линии сообщают победителя.", color = Muted, fontSize = 12.sp)
+            Text("После игры капитаны барон-линии сообщают победителя.", color = Muted, fontSize = 12.sp)
             Text("Подтверждений результата: ${match.reportCount}/2", color = Accent, fontSize = 13.sp)
             if (match.isCaptain && match.ownReport == null) {
                 var selected by rememberSaveable(match.id) { mutableStateOf<Side?>(null) }
@@ -597,6 +637,24 @@ fun HistoryScreen(results: List<DemoResult>, state: ScrimUiState, vm: ScrimViewM
     LaunchedEffect(state.hasOnlineAccount) { if (state.hasOnlineAccount) vm.loadOnlineResults() }
     Page {
         if (state.hasOnlineAccount) {
+            Eyebrow("Личная статистика клуба")
+            state.personalStats?.let { stats ->
+                PanelCard {
+                    Row(modifier=Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.SpaceBetween) {
+                        Metric(stats.played.toString(),"Матчи")
+                        Metric(stats.wins.toString(),"Победы")
+                        Metric(stats.winRate?.let { "$it%" } ?: "—","Винрейт")
+                    }
+                    Text("Поражения: ${stats.losses} · Аннулировано: ${stats.voids}",color=Muted,fontSize=12.sp)
+                    Text("Калибровка: ${stats.calibrated}/${stats.target} подтверждённых игр",fontWeight=FontWeight.Bold)
+                    Text(if(stats.calibrated<stats.target) "Предварительная оценка; выборка пока мала." else "Начальная выборка собрана. Оценка не является Riot MMR.",color=Muted,fontSize=12.sp)
+                    HorizontalDivider(color=Outline)
+                    Eyebrow("По фактическим ролям")
+                    stats.roles.forEach { role ->
+                        Text("${Role.entries.firstOrNull { it.name==role.role }?.title ?: role.role}: ${role.played} игр · ${role.wins} побед · ${role.losses} поражений",fontSize=13.sp)
+                    }
+                }
+            }
             Eyebrow("Подтверждённые матчи")
             PanelCard {
                 SecondaryAction("Обновить результаты", enabled = !state.onlineBusy) { vm.loadOnlineResults() }
@@ -606,6 +664,7 @@ fun HistoryScreen(results: List<DemoResult>, state: ScrimUiState, vm: ScrimViewM
                 else online.forEach { result ->
                     Text(when { result.winner == "VOID" -> "Аннулирован"; result.winner == result.side -> "Победа"; else -> "Поражение" }, fontWeight = FontWeight.Bold)
                     Text(SimpleDateFormat("dd.MM.yyyy HH:mm", Locale("ru")).format(Date(result.resolvedAt * 1000)), color = Muted, fontSize = 12.sp)
+                    if(result.role.isNotBlank()) Text("Роль: " + (Role.entries.firstOrNull { it.name==result.role }?.title ?: result.role),color=Muted,fontSize=12.sp)
                     HorizontalDivider(color = Outline)
                 }
             }
