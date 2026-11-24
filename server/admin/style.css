@@ -4,3 +4,5 @@
 .evidence>div{min-width:0;display:grid;gap:8px;align-content:start}.evidence>div>button{width:100%;overflow-wrap:anywhere}.evidence>div>p{font-size:12px;margin:0;overflow-wrap:anywhere}
 
 #sessionList{margin-top:16px}#sessionForm input,#sessionForm select{min-width:0;width:100%}nav{flex-wrap:wrap}
+
+#complaintList textarea{font:inherit;background:#1b2023;color:var(--text);border:1px solid var(--line);border-radius:8px;width:100%;padding:10px;min-height:80px;resize:vertical}

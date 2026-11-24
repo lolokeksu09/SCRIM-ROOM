@@ -9,6 +9,8 @@ import dev.lolokeksu.scrimroom.data.LocalStore
 import dev.lolokeksu.scrimroom.data.OnlineQueueState
 import dev.lolokeksu.scrimroom.data.OnlineResult
 import dev.lolokeksu.scrimroom.data.PlaySession
+import dev.lolokeksu.scrimroom.data.CommunityData
+import dev.lolokeksu.scrimroom.data.SocialPlayer
 import dev.lolokeksu.scrimroom.data.OcrSuggestions
 import dev.lolokeksu.scrimroom.data.RemoteClient
 import dev.lolokeksu.scrimroom.data.toOnlineQueueState
@@ -42,6 +44,8 @@ data class ScrimUiState(
     val onlineQueue: OnlineQueueState? = null,
     val onlineResults: List<OnlineResult>? = null,
     val sessions: List<PlaySession>? = null,
+    val community: CommunityData? = null,
+    val foundPlayer: SocialPlayer? = null,
     val ocrSuggestions: OcrSuggestions? = null,
     val onlineBusy: Boolean = false,
     val message: String? = null
@@ -83,6 +87,8 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             onlineQueue = if (changed) null else it.onlineQueue,
             onlineResults = if (changed) null else it.onlineResults,
             sessions = if (changed) null else it.sessions,
+            community = if (changed) null else it.community,
+            foundPlayer = if (changed) null else it.foundPlayer,
             ocrSuggestions = if (changed) null else it.ocrSuggestions,
             onlineEvidenceCount = if (changed) 0 else it.onlineEvidenceCount,
             message = if (changed) "HTTPS-сервер сохранён. Привязка к прежнему серверу сброшена." else "Адрес сервера сохранён."
@@ -266,6 +272,33 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
         _state.update { it.copy(ocrSuggestions = null) }
         val suggestions = RemoteClient(store.readServerUrl()).recognizeEvidence(token, slot)
         _state.update { it.copy(ocrSuggestions = suggestions, message = "Распознавание завершено. Проверь значения по оригиналу.") }
+    }
+
+    private fun communityAction(action: (RemoteClient, String) -> Unit = { _, _ -> }) = onlineAction {
+        val token = store.readServerToken()
+        if (token.isBlank()) return@onlineAction
+        val api = RemoteClient(store.readServerUrl())
+        action(api, token)
+        val data = api.community(token)
+        val sessions = api.sessions(token)
+        _state.update { it.copy(community = data, sessions = sessions, foundPlayer = null) }
+    }
+    fun loadCommunity() = communityAction()
+    fun findCommunityPlayer(riotId: String) = onlineAction {
+        _state.update { it.copy(foundPlayer = null) }
+        val player = RemoteClient(store.readServerUrl()).findPlayer(store.readServerToken(), riotId.trim())
+        _state.update { it.copy(foundPlayer = player) }
+    }
+    fun requestFriend(id: String) = communityAction { api, token -> api.requestFriend(token,id) }
+    fun changeFriend(id: String, accept: Boolean) = communityAction { api, token -> api.friendAction(token,id,accept) }
+    fun inviteFriend(id: String, session: String) = communityAction { api, token ->
+        api.inviteFriend(token,id,session)
+        _state.update { it.copy(message = "Приглашение отправлено") }
+    }
+    fun dismissInvite(id: String) = communityAction { api, token -> api.dismissInvite(token,id) }
+    fun sendComplaint(match: String, id: String, category: String, note: String) = communityAction { api, token ->
+        api.complain(token,match,id,category,note)
+        _state.update { it.copy(message = "Жалоба отправлена модератору") }
     }
 
     fun persistDocumentUris(uris: List<Uri>): List<String> {

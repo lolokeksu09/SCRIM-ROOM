@@ -108,6 +108,26 @@ class RemoteClient(baseInput: String) {
             (0 until ranks.length()).map { ranks.getString(it) })
     }
 
+    private fun JSONObject.socialPlayer() = SocialPlayer(getString("id"), getString("riot_id"), getString("primary"), getString("secondary"), getString("relationship"))
+    fun findPlayer(token: String, riotId: String) = jsonRequest("GET", "/v1/community/find?riot_id=" + Uri.encode(riotId), token).socialPlayer()
+    fun community(token: String): CommunityData {
+        val data = jsonRequest("GET", "/v1/community", token)
+        fun rows(name: String) = data.getJSONArray(name).let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+        val recent = jsonRequest("GET", "/v1/community/recent-players", token).getJSONArray("players")
+        return CommunityData(rows("friends").map { it.socialPlayer() },
+            rows("invites").map { SessionInvitation(it.getString("id"), it.getString("title"), it.getString("sender"), it.getLong("starts_at")) },
+            rows("reports").map { ComplaintStatus(it.getString("category"), it.getString("status")) },
+            (0 until recent.length()).map { i -> recent.getJSONObject(i).let {
+                RecentPlayer(it.getString("match_id"), it.getString("account_id"), it.getString("riot_id"), it.getLong("created_at"))
+            } }, data.getInt("confirmed_complaints"))
+    }
+    fun requestFriend(token: String, id: String) = jsonRequest("POST", "/v1/community/friends/request", token, JSONObject().put("account_id", id))
+    fun friendAction(token: String, id: String, accept: Boolean) = jsonRequest("POST", "/v1/community/friends/${Uri.encode(id)}/${if (accept) "accept" else "remove"}", token)
+    fun inviteFriend(token: String, id: String, sessionId: String) = jsonRequest("POST", "/v1/community/invites", token, JSONObject().put("account_id", id).put("session_id", sessionId))
+    fun dismissInvite(token: String, id: String) = jsonRequest("POST", "/v1/community/invites/${Uri.encode(id)}/dismiss", token)
+    fun complain(token: String, matchId: String, id: String, category: String, note: String) = jsonRequest("POST", "/v1/community/reports", token,
+        JSONObject().put("match_id", matchId).put("account_id", id).put("category", category).put("note", note))
+
     fun uploadEvidence(token: String, resolver: ContentResolver, uri: Uri): JSONObject {
         val mime = resolver.getType(uri)
         require(mime in setOf("image/png", "image/jpeg", "image/webp")) {
@@ -202,3 +222,10 @@ fun JSONObject.toOnlineQueueState(): OnlineQueueState {
         optInt("waiting_in_region"), match, optJSONObject("discipline")?.optInt("incidents") ?: 0,
         optJSONObject("discipline")?.optLong("blocked_until") ?: 0, optString("session_id").takeUnless { it.isBlank() || it == "null" })
 }
+
+
+data class SocialPlayer(val id: String, val riotId: String, val primary: String, val secondary: String, val relationship: String)
+data class SessionInvitation(val id: String, val title: String, val sender: String, val startsAt: Long)
+data class ComplaintStatus(val category: String, val status: String)
+data class RecentPlayer(val matchId: String, val accountId: String, val riotId: String, val createdAt: Long)
+data class CommunityData(val friends: List<SocialPlayer>, val invites: List<SessionInvitation>, val reports: List<ComplaintStatus>, val recent: List<RecentPlayer>, val confirmedComplaints: Int)
