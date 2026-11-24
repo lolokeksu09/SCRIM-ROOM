@@ -64,6 +64,8 @@ class LocalStore(context: Context) {
     fun readServerToken(): String = prefs.getString("server_token", "") ?: ""
     fun writeServerToken(value: String) { prefs.edit().putString("server_token", value).apply() }
 
+    fun clearCredentials() { prefs.edit().remove("server_token").remove("submitted_fingerprint").remove("uploaded_uris").apply() }
+
     fun readSubmittedFingerprint(): String = prefs.getString("submitted_fingerprint", "") ?: ""
     fun writeSubmittedFingerprint(value: String) { prefs.edit().putString("submitted_fingerprint", value).apply() }
 

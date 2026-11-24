@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -145,7 +146,7 @@ private fun StatusPill(label: String, active: Boolean = false) {
 }
 
 @Composable
-fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, onCommunity: () -> Unit, onClub: () -> Unit) {
+fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, onCommunity: () -> Unit, onClub: () -> Unit, onSettings: () -> Unit) {
     Page {
         Eyebrow("Независимые пользовательские матчи")
         Headline("Сильные игроки.\nЧестный подбор.", "Проектируем закрытые 5×5 матчи для сообщества Wild Rift. Это неофициальный инструмент организации игр.")
@@ -178,6 +179,12 @@ fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, 
             Text("Команды и турниры",fontSize=20.sp,fontWeight=FontWeight.Bold)
             Text("Постоянные составы 5×5, встречи и сезонные кубки.",color=Muted,fontSize=13.sp)
             SecondaryAction("Открыть соревнования") { onClub() }
+        }
+        PanelCard {
+            Eyebrow("Аккаунт и уведомления")
+            Text("Настройки",fontSize=20.sp,fontWeight=FontWeight.Bold)
+            Text("Восстановление доступа, приватность и уведомления.",color=Muted,fontSize=13.sp)
+            SecondaryAction("Открыть настройки") {onSettings()}
         }
         PanelCard {
             Eyebrow("Локальный эксперимент")
@@ -943,4 +950,74 @@ fun CompetitiveScreen(state: ScrimUiState,vm: ScrimViewModel) {
 
 private fun clubStatus(status:String)=when(status){
     "PENDING"->"Ожидает капитана";"SCHEDULED"->"Запланирована";"FINISHED"->"Завершено";"RUNNING"->"Турнир идёт";"EXPIRED"->"Время истекло";"CANCELLED"->"Отменено";else->status
+}
+
+
+@Composable
+fun AccountSettingsScreen(state:ScrimUiState,vm:ScrimViewModel,onProfile:()->Unit) {
+    val context=androidx.compose.ui.platform.LocalContext.current
+    var input by remember {mutableStateOf("")}
+    var confirm by remember {mutableStateOf("")}
+    val watcher by dev.lolokeksu.scrimroom.QueueWatchService.running.collectAsState()
+    val permission=rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()){ granted ->
+        if(granted) dev.lolokeksu.scrimroom.QueueWatchService.start(context)
+    }
+    LaunchedEffect(state.hasOnlineAccount,state.serverUrl){if(state.hasOnlineAccount)vm.loadAccountSettings()}
+    Page {
+        Eyebrow("Управление аккаунтом")
+        Headline("Настройки аккаунта","Безопасность, приватность и уведомления клуба.")
+        PanelCard {
+            Eyebrow("Восстановление доступа")
+            if(state.hasOnlineAccount){
+                Text("Создай одноразовый код и сохрани в надёжном месте вне приложения. Новый код отменяет предыдущий. Восстановление отключает старый токен.",color=Muted,fontSize=12.sp)
+                PrimaryAction("Создать код восстановления",enabled=!state.onlineBusy){confirm="issue"}
+                SecondaryAction("Отключить аккаунт",enabled=!state.onlineBusy){confirm="disconnect"}
+            }else{
+                Text("Сначала укажи HTTPS-сервер проекта. Для восстановления нужен ранее сохранённый код.",color=Muted,fontSize=12.sp)
+                if(state.serverUrl.isBlank()) SecondaryAction("Настроить сервер"){onProfile()}
+                OutlinedTextField(input,{input=it.take(43)},label={Text("Код восстановления")},singleLine=true,visualTransformation=androidx.compose.ui.text.input.PasswordVisualTransformation(),modifier=Modifier.fillMaxWidth())
+                PrimaryAction("Восстановить доступ",enabled=!state.onlineBusy && state.serverUrl.isNotBlank() && input.trim().length==43){val code=input.trim();input="";vm.recoverAccount(code)}
+            }
+        }
+        if(state.hasOnlineAccount){
+            PanelCard {
+                Eyebrow("Приватность")
+                Text("Разрешать новым игрокам находить меня по точному Riot ID и отправлять запросы в друзья или команду. Уже существующие связи и история матчей сохраняются.",color=Muted,fontSize=12.sp)
+                state.discoverable?.let { value ->
+                    Row(verticalAlignment=Alignment.CenterVertically){Checkbox(checked=value,onCheckedChange={vm.setDiscoverable(it)},enabled=!state.onlineBusy);Text("Разрешить новые контакты")}
+                } ?: Text("Настройки ещё не загружены",color=Muted)
+            }
+            PanelCard {
+                Eyebrow("Фоновое наблюдение")
+                Text("Включается вручную во время поиска или подтверждения. Проверяет очередь через HTTPS каждые 5 секунд при свёрнутом приложении, пока Android разрешает работу службы. Это не push.",color=Muted,fontSize=12.sp)
+                if(watcher) SecondaryAction("Остановить наблюдение"){dev.lolokeksu.scrimroom.QueueWatchService.stop(context)}
+                else PrimaryAction("Включить наблюдение",enabled=state.onlineQueue?.queued==true || state.onlineQueue?.match?.status=="READY_CHECK"){
+                    if(android.os.Build.VERSION.SDK_INT>=33 && context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)!=android.content.pm.PackageManager.PERMISSION_GRANTED)permission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+                    else dev.lolokeksu.scrimroom.QueueWatchService.start(context)
+                }
+            }
+            PanelCard {
+                Eyebrow("Центр уведомлений")
+                SecondaryAction("Обновить уведомления",enabled=!state.onlineBusy){vm.loadAccountSettings()}
+                val items=state.inbox
+                if(items==null) Text("Уведомления ещё не загружены",color=Muted)
+                else {
+                    Text("Непрочитанных: ${items.count{!it.read}}",color=Accent)
+                    SecondaryAction("Отметить всё прочитанным",enabled=!state.onlineBusy && items.any{!it.read}){vm.readInbox()}
+                    items.forEach { item ->
+                        Text(item.title+(if(!item.read) " · Новое" else ""),fontWeight=FontWeight.Bold)
+                        Text(item.body,fontSize=13.sp,color=Muted)
+                        HorizontalDivider(color=Outline)
+                    }
+                }
+            }
+        }
+    }
+    if(confirm.isNotEmpty()) AlertDialog(onDismissRequest={confirm=""},title={Text(if(confirm=="issue")"Заменить код восстановления?" else "Отключить аккаунт?")},text={Text(if(confirm=="issue")"Старый код перестанет работать." else "Локальный токен будет удалён. Для возвращения нужен код восстановления. Поиск и назначенные матчи на сервере не отменяются.")},confirmButton={TextButton(onClick={val action=confirm;confirm="";if(action=="issue")vm.issueRecovery() else vm.disconnectAccount()}){Text("Подтвердить")}},dismissButton={TextButton(onClick={confirm=""}){Text("Отмена")}})
+    state.recoveryCode?.let { code ->
+        AlertDialog(onDismissRequest={vm.hideRecovery()},title={Text("Сохрани код вне приложения")},text={Column{
+            androidx.compose.foundation.text.selection.SelectionContainer{Text(code,fontWeight=FontWeight.Bold)}
+            Text("Код показан один раз. Не передавай его другим людям.",color=Muted,fontSize=12.sp)
+        }},confirmButton={TextButton(onClick={vm.hideRecovery()}){Text("Сохранено")}},properties=androidx.compose.ui.window.DialogProperties(securePolicy=androidx.compose.ui.window.SecureFlagPolicy.SecureOn))
+    }
 }

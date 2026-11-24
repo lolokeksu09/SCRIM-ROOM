@@ -3,11 +3,11 @@ const $=id=>document.getElementById(id);
 const ranks={BELOW_MASTER:'Алмаз и ниже',MASTER:'Мастер',GRANDMASTER:'Грандмастер',CHALLENGER:'Претендент',SOVEREIGN:'Суверен'};
 const roles={BARON:'Барон',JUNGLE:'Лес',MID:'Мид',DRAGON:'ADC',SUPPORT:'Поддержка'};
 const labels={PENDING_REVIEW:'На проверке',APPROVED:'Допущен',REJECTED:'Отклонён',READY_CHECK:'Подтверждение',ACTIVE:'Активный',DISPUTED:'Спорный результат'};
-let key='',accounts=[],matches=[],sessions=[],complaints=[],qualityHistory=[],competitive=null,selected=null,epoch=0,busy=false,images=[];
+let key='',accounts=[],matches=[],sessions=[],complaints=[],qualityHistory=[],competitive=null,operations=null,selected=null,epoch=0,busy=false,images=[];
 const node=(tag,value,cls)=>{const n=document.createElement(tag);if(value!==undefined)n.textContent=value;if(cls)n.className=cls;return n};
 function say(message){$('notice').textContent=message}
 function releaseImages(){if($('preview').open)$('preview').close();$('fullImage').removeAttribute('src');images.forEach(URL.revokeObjectURL);images=[]}
-function logout(message=''){epoch++;key='';accounts=[];matches=[];sessions=[];complaints=[];qualityHistory=[];competitive=null;selected=null;busy=false;releaseImages();$('list').replaceChildren();$('detail').replaceChildren();$('matchList').replaceChildren();$('qualityHistory').replaceChildren();for(const id of ['seasonList','cupList','fixtureList','clubTeams','cupTeams','cupSeason'])$(id).replaceChildren();$('seasonForm').reset();$('cupForm').reset();$('sessionList').replaceChildren();$('complaintList').replaceChildren();$('sessionForm').reset();$('metrics').replaceChildren();$('key').value='';$('workspace').hidden=true;$('logout').hidden=true;$('login').hidden=false;say(message)}
+function logout(message=''){epoch++;key='';accounts=[];matches=[];sessions=[];complaints=[];qualityHistory=[];competitive=null;operations=null;selected=null;busy=false;releaseImages();$('list').replaceChildren();$('detail').replaceChildren();$('matchList').replaceChildren();$('qualityHistory').replaceChildren();$('serverStatus').replaceChildren();$('auditList').replaceChildren();for(const id of ['seasonList','cupList','fixtureList','clubTeams','cupTeams','cupSeason'])$(id).replaceChildren();$('seasonForm').reset();$('cupForm').reset();$('sessionList').replaceChildren();$('complaintList').replaceChildren();$('sessionForm').reset();$('metrics').replaceChildren();$('key').value='';$('workspace').hidden=true;$('logout').hidden=true;$('login').hidden=false;say(message)}
 async function api(path,options={}){
  const session=key;const version=epoch;
  const response=await fetch('/v1/admin'+path,{...options,cache:'no-store',credentials:'omit',headers:{'X-Admin-Key':session,...options.headers}});
@@ -17,8 +17,8 @@ async function api(path,options={}){
  return response;
 }
 async function load(){
- const session=key;const results=await Promise.all([api('/accounts').then(r=>r.json()),api('/matches').then(r=>r.json()),api('/sessions').then(r=>r.json()),api('/complaints').then(r=>r.json()),api('/match-quality').then(r=>r.json()),api('/competitive').then(r=>r.json())]);
- if(!key||key!==session)return;[accounts,matches]=results;sessions=results[2].sessions;complaints=results[3].reports;qualityHistory=results[4].matches;competitive=results[5];render();if(selected){const current=accounts.find(a=>a.id===selected.id);if(current)await detail(current);else{selected=null;$('detail').replaceChildren(node('p','Выберите заявку.'))}}
+ const session=key;const results=await Promise.all([api('/accounts').then(r=>r.json()),api('/matches').then(r=>r.json()),api('/sessions').then(r=>r.json()),api('/complaints').then(r=>r.json()),api('/match-quality').then(r=>r.json()),api('/competitive').then(r=>r.json()),api('/operations').then(r=>r.json())]);
+ if(!key||key!==session)return;[accounts,matches]=results;sessions=results[2].sessions;complaints=results[3].reports;qualityHistory=results[4].matches;competitive=results[5];operations=results[6];render();if(selected){const current=accounts.find(a=>a.id===selected.id);if(current)await detail(current);else{selected=null;$('detail').replaceChildren(node('p','Выберите заявку.'))}}
 }
 function render(){
  $('metrics').replaceChildren(...[['На проверке',accounts.filter(a=>a.status==='PENDING_REVIEW').length],['Допущены',accounts.filter(a=>a.status==='APPROVED').length],['Отклонены',accounts.filter(a=>a.status==='REJECTED').length],['Матчи',matches.length]].map(([label,count])=>{const n=node('div',undefined,'metric');n.append(node('strong',String(count)),node('small',label));return n}));
@@ -28,7 +28,7 @@ function render(){
  if(!filtered.length)$('list').append(node('p','Нет заявок по выбранному фильтру.'));
  $('matchList').replaceChildren(...matches.map(m=>{const card=node('article',undefined,'match');card.append(node('h2',(labels[m.status]||m.status)+' · '+m.region),node('p','Готовность: '+m.ready_count+'/10'));const teams=node('div',undefined,'teams');for(const [name,players] of [['Синие',m.blue],['Красные',m.red]]){const team=node('section');team.append(node('strong',name));players.forEach(p=>team.append(node('p',(roles[p.role]||p.role)+' · '+p.riot_id+(p.ready?' ✓':''))));teams.append(team)}card.append(teams);if(m.quality)card.append(qualityCard(m.quality));if(m.lobby_room)card.append(node('p','Лобби: '+m.lobby_room+' · Отметились '+m.lobby_arrivals+'/10'));for(const side of (m.evidence_sides||[])){const b=node('button','Скриншот: '+(side==='BLUE'?'синие':'красные'));b.onclick=async()=>{const version=epoch;try{const res=await api('/matches/'+encodeURIComponent(m.id)+'/evidence/'+encodeURIComponent(side));const blob=await res.blob();if(version!==epoch||!key)return;const url=URL.createObjectURL(blob);images.push(url);$('fullImage').src=url;$('preview').showModal()}catch(e){if(key)say(e.message)}};card.append(b)}if(m.status==='ACTIVE'){card.append(node('p','Подтверждений капитанов: '+m.report_count+'/2'));const b=node('button','Аннулировать без очков','danger');b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/close',null,'Аннулировать матч без изменения оценки?');card.append(b)}if(m.status==='DISPUTED'){card.append(node('p','Капитан синих: '+m.reports.BLUE+' · Капитан красных: '+m.reports.RED),node('p','Проверьте прикреплённые скриншоты и обстоятельства перед решением.'));const a=node('div',undefined,'actions');for(const [winner,label] of [['BLUE','Победа синих'],['RED','Победа красных'],['VOID','Аннулировать']]){const b=node('button',label);b.onclick=()=>mutate('/matches/'+encodeURIComponent(m.id)+'/resolve',null,'Подтвердить решение: '+label+'?',{winner});a.append(b)}card.append(a)}return card}));
  if(!matches.length)$('matchList').append(node('p','Назначенных матчей нет.'));
- renderSessions();renderComplaints();renderQualityHistory();renderCompetitive();
+ renderSessions();renderComplaints();renderQualityHistory();renderCompetitive();renderOperations();
 }
 async function detail(a){
  releaseImages();selected=a;const version=++epoch;render();
@@ -48,8 +48,8 @@ async function mutate(path,revision,prompt,body){
 }
 $('loginForm').onsubmit=async event=>{event.preventDefault();if(busy)return;key=$('key').value;$('key').value='';busy=true;try{await load();if(key){$('login').hidden=true;$('workspace').hidden=false;$('logout').hidden=false;say('')}}catch(e){logout(e.message)}finally{busy=false}};
 $('logout').onclick=()=>logout();$('refresh').onclick=()=>{if(!busy)load().catch(e=>{if(key)say(e.message)})};$('filter').onchange=render;$('search').oninput=render;
-function tab(name){for(const n of ['accounts','matches','sessions','complaints','competitive']){$(n).hidden=n!==name;$(n+'Tab').setAttribute('aria-pressed',String(n===name))}}
-$('accountsTab').onclick=()=>tab('accounts');$('matchesTab').onclick=()=>tab('matches');$('sessionsTab').onclick=()=>tab('sessions');$('complaintsTab').onclick=()=>tab('complaints');$('competitiveTab').onclick=()=>tab('competitive');$('closePreview').onclick=()=>$('preview').close();
+function tab(name){for(const n of ['accounts','matches','sessions','complaints','competitive','operations']){$(n).hidden=n!==name;$(n+'Tab').setAttribute('aria-pressed',String(n===name))}}
+$('accountsTab').onclick=()=>tab('accounts');$('matchesTab').onclick=()=>tab('matches');$('sessionsTab').onclick=()=>tab('sessions');$('complaintsTab').onclick=()=>tab('complaints');$('competitiveTab').onclick=()=>tab('competitive');$('operationsTab').onclick=()=>tab('operations');$('closePreview').onclick=()=>$('preview').close();
 function renderSessions(){
  const statuses={UPCOMING:'Предстоит',OPEN:'Открыта',ENDED:'Завершена',CANCELLED:'Отменена'};
  $('sessionList').replaceChildren(...sessions.map(s=>{
@@ -137,3 +137,15 @@ function renderCompetitive(){
 $('cupSeason').onchange=renderCupTeams;
 $('seasonForm').onsubmit=e=>{e.preventDefault();const start=Math.floor(new Date($('seasonStart').value).getTime()/1000);if(!Number.isFinite(start)){say('Укажи дату');return}mutate('/competitive/seasons',null,'Создать сезон?',{name:$('seasonName').value,region:$('seasonRegion').value,starts_at:start,ends_at:start+Number($('seasonDays').value)*86400})};
 $('cupForm').onsubmit=e=>{e.preventDefault();const start=Math.floor(new Date($('cupStart').value).getTime()/1000);const teams=[...$('cupTeams').querySelectorAll('select')].map(s=>s.value);if(!Number.isFinite(start)||teams.some(t=>!t)||new Set(teams).size!==4){say('Выбери четыре разные команды и дату');return}mutate('/competitive/cups',null,'Создать турнир с фиксированными составами?',{name:$('cupName').value,season_id:$('cupSeason').value,starts_at:start,teams})};
+
+function renderOperations(){
+ if(!operations)return;
+ const n=node('article');n.append(node('h2','База данных: '+operations.database));
+ for(const [k,v] of Object.entries(operations.counts))n.append(node('p',k+': '+v));
+ $('serverStatus').replaceChildren(n);
+ $('auditList').replaceChildren(...operations.audit.map(a=>{
+   const card=node('article',undefined,'match');
+   card.append(node('strong',a.method+' '+a.route+' · HTTP '+a.status),node('p',new Date(a.at*1000).toLocaleString()+(a.resource?' · '+a.resource:'')));return card
+ }));
+ if(!operations.audit.length)$('auditList').append(node('p','Нет записей.'));
+}

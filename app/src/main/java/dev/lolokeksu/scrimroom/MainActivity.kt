@@ -57,11 +57,12 @@ import dev.lolokeksu.scrimroom.ui.QueueScreen
 import dev.lolokeksu.scrimroom.ui.SessionsScreen
 import dev.lolokeksu.scrimroom.ui.CommunityScreen
 import dev.lolokeksu.scrimroom.ui.CompetitiveScreen
+import dev.lolokeksu.scrimroom.ui.AccountSettingsScreen
 import androidx.compose.material.icons.filled.DateRange
 import dev.lolokeksu.scrimroom.ui.ScrimTheme
 import dev.lolokeksu.scrimroom.ui.ScrimViewModel
 
-private enum class Tab(val title: String) { HOME("Главная"), PROFILE("Профиль"), QUEUE("Очередь"), SESSIONS("Сессии"), HISTORY("Матчи"), COMMUNITY("Сообщество"), CLUB("Соревнования") }
+private enum class Tab(val title: String) { HOME("Главная"), PROFILE("Профиль"), QUEUE("Очередь"), SESSIONS("Сессии"), HISTORY("Матчи"), COMMUNITY("Сообщество"), CLUB("Соревнования"), SETTINGS("Настройки") }
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,16 +96,16 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
             NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                Tab.entries.filter { it != Tab.COMMUNITY && it != Tab.CLUB }.forEach { item ->
+                Tab.entries.filter { it != Tab.COMMUNITY && it != Tab.CLUB && it != Tab.SETTINGS }.forEach { item ->
                     val icon = when (item) {
-                        Tab.HOME, Tab.COMMUNITY, Tab.CLUB -> Icons.Filled.Home
+                        Tab.HOME, Tab.COMMUNITY, Tab.CLUB, Tab.SETTINGS -> Icons.Filled.Home
                         Tab.PROFILE -> Icons.Filled.Person
                         Tab.QUEUE -> Icons.Filled.People
                         Tab.SESSIONS -> Icons.Filled.DateRange
                         Tab.HISTORY -> Icons.Filled.History
                     }
                     NavigationBarItem(
-                        selected = item == tab || item == Tab.HOME && (tab == Tab.COMMUNITY || tab == Tab.CLUB),
+                        selected = item == tab || item == Tab.HOME && (tab == Tab.COMMUNITY || tab == Tab.CLUB || tab == Tab.SETTINGS),
                         onClick = { tabName = item.name },
                         icon = { Icon(icon, contentDescription = null, modifier = Modifier.size(22.dp)) },
                         label = { Text(item.title, fontSize = 11.sp) },
@@ -137,13 +138,15 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
                         onProfile = { tabName = Tab.PROFILE.name },
                         onQueue = { tabName = Tab.QUEUE.name },
                         onCommunity = { tabName = Tab.COMMUNITY.name },
-                        onClub = { tabName = Tab.CLUB.name }
+                        onClub = { tabName = Tab.CLUB.name },
+                        onSettings = { tabName = Tab.SETTINGS.name }
                     )
                     Tab.PROFILE -> ProfileScreen(state.profile, state, vm)
                     Tab.QUEUE -> QueueScreen(state, vm, onProfile = { tabName = Tab.PROFILE.name })
                     Tab.SESSIONS -> SessionsScreen(state, vm, onProfile = { tabName = Tab.PROFILE.name }, onQueue = { tabName = Tab.QUEUE.name })
                     Tab.COMMUNITY -> CommunityScreen(state, vm, onSessions = { tabName = Tab.SESSIONS.name })
                     Tab.CLUB -> CompetitiveScreen(state,vm)
+                    Tab.SETTINGS -> AccountSettingsScreen(state,vm,onProfile={tabName=Tab.PROFILE.name})
                     Tab.HISTORY -> HistoryScreen(state.demoHistory, state, vm)
                 }
             }

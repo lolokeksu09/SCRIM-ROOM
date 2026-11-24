@@ -168,6 +168,16 @@ class RemoteClient(baseInput: String) {
     fun createClubChallenge(token:String,opponent:String,season:String,starts:Long)=jsonRequest("POST","/v1/competitive/challenges",token,JSONObject().put("opponent_id",opponent).put("season_id",season).put("starts_at",starts))
     fun clubChallengeAction(token:String,id:String,accept:Boolean)=jsonRequest("POST","/v1/competitive/challenges/${Uri.encode(id)}/${if(accept) "accept" else "decline"}",token)
 
+    fun issueRecovery(token:String)=jsonRequest("POST","/v1/me/recovery",token).getString("code")
+    fun recover(code:String)=jsonRequest("POST","/v1/recover",data=JSONObject().put("code",code))
+    fun discoverable(token:String)=jsonRequest("GET","/v1/me/privacy",token).getBoolean("discoverable")
+    fun setDiscoverable(token:String,value:Boolean)=jsonRequest("PUT","/v1/me/privacy",token,JSONObject().put("discoverable",value)).getBoolean("discoverable")
+    fun inbox(token:String):List<InboxItem> {
+        val rows=jsonRequest("GET","/v1/me/inbox",token).getJSONArray("items")
+        return (0 until rows.length()).map { i -> rows.getJSONObject(i).let { InboxItem(it.getString("id"),it.getString("title"),it.getString("body"),it.getLong("at"),it.getBoolean("read")) } }
+    }
+    fun readInbox(token:String,ids:List<String>)=jsonRequest("POST","/v1/me/inbox/read",token,JSONObject().put("ids",org.json.JSONArray(ids)))
+
     fun uploadEvidence(token: String, resolver: ContentResolver, uri: Uri): JSONObject = uploadImage(token,resolver,uri,"/v1/me/evidence")
 
     private fun uploadImage(token: String, resolver: ContentResolver, uri: Uri, path: String): JSONObject {
@@ -298,3 +308,5 @@ data class ClubFixture(val id:String,val a:String,val b:String,val aName:String,
 data class ClubCup(val id:String,val name:String,val status:String,val winner:String?)
 data class ClubData(val mine:ClubTeam?,val captain:Boolean,val teams:List<ClubTeam>,val invites:List<ClubInvite>,val seasons:List<ClubSeason>,val fixtures:List<ClubFixture>,val cups:List<ClubCup>,val standings:Map<String,List<ClubStanding>>)
 data class ClubStanding(val name:String,val played:Int,val wins:Int,val losses:Int)
+
+data class InboxItem(val id:String,val title:String,val body:String,val at:Long,val read:Boolean)

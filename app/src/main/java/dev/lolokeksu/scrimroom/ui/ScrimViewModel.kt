@@ -12,6 +12,11 @@ import dev.lolokeksu.scrimroom.data.PersonalStats
 import dev.lolokeksu.scrimroom.data.PlaySession
 import dev.lolokeksu.scrimroom.data.CommunityData
 import dev.lolokeksu.scrimroom.data.ClubData
+import dev.lolokeksu.scrimroom.data.InboxItem
+import dev.lolokeksu.scrimroom.QueueWatchService
+import dev.lolokeksu.scrimroom.data.RemoteException
+import dev.lolokeksu.scrimroom.model.Rank
+import dev.lolokeksu.scrimroom.model.Role
 import dev.lolokeksu.scrimroom.data.SocialPlayer
 import dev.lolokeksu.scrimroom.data.OcrSuggestions
 import dev.lolokeksu.scrimroom.data.RemoteClient
@@ -49,6 +54,9 @@ data class ScrimUiState(
     val sessions: List<PlaySession>? = null,
     val community: CommunityData? = null,
     val club: ClubData? = null,
+    val inbox: List<InboxItem>? = null,
+    val discoverable: Boolean? = null,
+    val recoveryCode: String? = null,
     val foundPlayer: SocialPlayer? = null,
     val ocrSuggestions: OcrSuggestions? = null,
     val onlineBusy: Boolean = false,
@@ -84,6 +92,7 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val changed = store.readServerUrl() != normalized
+        if (changed) QueueWatchService.stop(getApplication<Application>())
         store.writeServerUrl(normalized)
         _state.update { it.copy(serverUrl = normalized,
             hasOnlineAccount = if (changed) false else it.hasOnlineAccount,
@@ -94,6 +103,9 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             sessions = if (changed) null else it.sessions,
             community = if (changed) null else it.community,
             club = if (changed) null else it.club,
+            inbox = if (changed) null else it.inbox,
+            discoverable = if (changed) null else it.discoverable,
+            recoveryCode = null,
             foundPlayer = if (changed) null else it.foundPlayer,
             ocrSuggestions = if (changed) null else it.ocrSuggestions,
             onlineEvidenceCount = if (changed) 0 else it.onlineEvidenceCount,
@@ -184,6 +196,11 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
+                if (error is RemoteException && error.statusCode == 401 && store.readServerToken().isNotBlank()) {
+                    store.clearCredentials()
+                    QueueWatchService.stop(getApplication<Application>())
+                    _state.update { it.copy(hasOnlineAccount=false, onlineStatus=null, onlineQueue=null, onlineEvidenceCount=0, onlineResults=null, personalStats=null, community=null, club=null, sessions=null, foundPlayer=null, ocrSuggestions=null,inbox=null,discoverable=null,recoveryCode=null) }
+                }
                 _state.update { it.copy(message = error.message ?: "Ошибка подключения к серверу") }
             } finally {
                 _state.update { it.copy(onlineBusy = false) }
@@ -344,6 +361,51 @@ class ScrimViewModel(application: Application) : AndroidViewModel(application) {
     fun clubMemberAction(id:String,transfer:Boolean)=clubAction { api,t -> api.clubMemberAction(t,id,transfer) }
     fun createClubChallenge(opponent:String,season:String,starts:Long)=clubAction { api,t -> api.createClubChallenge(t,opponent,season,starts) }
     fun clubChallengeAction(id:String,accept:Boolean)=clubAction { api,t -> api.clubChallengeAction(t,id,accept) }
+
+    fun loadAccountSettings()=onlineAction {
+        val token=store.readServerToken()
+        if(token.isBlank()) return@onlineAction
+        val api=RemoteClient(store.readServerUrl())
+        val privacy=api.discoverable(token)
+        val inbox=api.inbox(token)
+        _state.update { it.copy(discoverable=privacy,inbox=inbox) }
+    }
+    fun issueRecovery()=onlineAction {
+        val code=RemoteClient(store.readServerUrl()).issueRecovery(store.readServerToken())
+        _state.update { it.copy(recoveryCode=code) }
+    }
+    fun hideRecovery(){_state.update {it.copy(recoveryCode=null)}}
+    fun recoverAccount(code:String)=onlineAction {
+        require(store.readServerToken().isBlank()){"Сначала отключи текущий аккаунт"}
+        val api=RemoteClient(store.readServerUrl())
+        val response=api.recover(code.trim())
+        val a=response.getJSONObject("account")
+        val profile=PlayerProfile(riotId=a.getString("riot_id"),region=a.getString("region"),
+            currentRank=Rank.valueOf(a.getString("current_rank")),previousRank=Rank.valueOf(a.getString("previous_rank")),
+            primary=Role.valueOf(a.getString("primary")),secondary=Role.valueOf(a.getString("secondary")),verification=Verification.PENDING_REVIEW)
+        store.writeServerToken(response.getString("token"))
+        store.writeProfile(profile)
+        store.writeSubmittedFingerprint(fingerprint(profile))
+        store.writeUploadedUris(emptySet())
+        _state.update { it.copy(profile=profile,hasOnlineAccount=true,onlineStatus=a.getString("status"),onlineEvidenceCount=a.getInt("evidence_count"),message="Доступ восстановлен. Создай новый код восстановления.") }
+    }
+    fun disconnectAccount(){
+        if(state.value.onlineBusy)return
+        QueueWatchService.stop(getApplication<Application>())
+        store.clearCredentials()
+        _state.update {it.copy(hasOnlineAccount=false,onlineStatus=null,onlineEvidenceCount=0,onlineQueue=null,onlineResults=null,personalStats=null,sessions=null,community=null,club=null,foundPlayer=null,ocrSuggestions=null,inbox=null,discoverable=null,recoveryCode=null,message="Аккаунт отключён на этом устройстве")}
+    }
+    fun setDiscoverable(value:Boolean)=onlineAction {
+        val changed=RemoteClient(store.readServerUrl()).setDiscoverable(store.readServerToken(),value)
+        _state.update {it.copy(discoverable=changed)}
+    }
+    fun readInbox()=onlineAction {
+        val token=store.readServerToken()
+        val api=RemoteClient(store.readServerUrl())
+        api.readInbox(token,state.value.inbox.orEmpty().filter{!it.read}.map{it.id})
+        val items=api.inbox(token)
+        _state.update {it.copy(inbox=items)}
+    }
 
     fun persistDocumentUris(uris: List<Uri>): List<String> {
         val resolver = getApplication<Application>().contentResolver
