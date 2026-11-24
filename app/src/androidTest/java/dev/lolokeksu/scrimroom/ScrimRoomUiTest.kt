@@ -8,6 +8,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -55,19 +56,19 @@ class ScrimRoomUiTest {
     @Test fun navigationAndOfflineQueue() {
         compose.onNodeWithText("SCRIM ROOM").assertExists()
         compose.onNodeWithText("RC ${BuildConfig.VERSION_NAME}").assertIsDisplayed()
-        compose.onNodeWithText("Сильные игроки.\nЧестный подбор.").assertExists()
+        compose.onNodeWithText("Игровой клуб").assertExists()
         shot("01-home")
-        compose.onNodeWithText("Открыть сообщество").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Открыть сообщество").performScrollTo().performClick()
         compose.onNodeWithText("Сообщество", substring = false).assertIsDisplayed()
         compose.onNodeWithText("Сообщество доступно после допуска игрока.").assertExists()
         shot("10-community-offline")
         compose.onNodeWithText("Главная").performClick()
-        compose.onNodeWithText("Открыть соревнования").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Открыть соревнования").performScrollTo().performClick()
         compose.onNodeWithText("Команды и турниры").assertIsDisplayed()
         compose.onNodeWithText("Соревнования доступны после допуска игрока.").assertExists()
         shot("11-competitive-offline")
         compose.onNodeWithText("Главная").performClick()
-        compose.onNodeWithText("Открыть настройки").performScrollTo().performClick()
+        compose.onNodeWithContentDescription("Открыть настройки").performScrollTo().performClick()
         compose.onNodeWithText("Настройки аккаунта").assertIsDisplayed()
         compose.onNodeWithText("Восстановить доступ").assertIsNotEnabled()
         shot("12-account-settings")

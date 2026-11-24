@@ -88,20 +88,20 @@ internal fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boole
     var room by remember(match.id,match.lobbyRoom) { mutableStateOf(match.lobbyRoom.orEmpty()) }
     var proofUri by remember(match.id) { mutableStateOf<android.net.Uri?>(null) }
     val resultPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri -> proofUri=uri }
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    var showBalance by rememberSaveable(match.id) { mutableStateOf(false) }
+    var showTeams by rememberSaveable(match.id) { mutableStateOf(true) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(when(match.status) { "READY_CHECK" -> "Матч найден · подтверждение"; "DISPUTED" -> "Результат оспаривается"; else -> "Матч подтверждён" },
             fontSize = 17.sp, fontWeight = FontWeight.Bold)
         Text("Готово игроков: ${match.readyCount}/10", color = Accent, fontSize = 13.sp)
-        match.quality?.let { quality ->
-            Eyebrow("Баланс составов")
-            Text("Разница средней оценки: ${quality.averageGap} · Вторых ролей: ${quality.secondaryCount}",color=Muted,fontSize=12.sp)
-            Text("Повторных пар союзников: ${quality.repeatedPairs}. Оценка не гарантирует равный исход.",color=Muted,fontSize=12.sp)
-        }
+        ReadinessStrip(match.readyCount)
         if (match.status == "READY_CHECK") {
             Text("Подтверди готовность в течение трёх минут после создания матча. Если не все ответят, матч отменится.", color = Muted, fontSize = 12.sp)
             if (match.serverNow>0) Text(String.format(Locale.ROOT,"%02d:%02d",remaining/60,remaining%60), color = if (remaining<=20) Red else Accent, fontWeight = FontWeight.Black, fontSize = 32.sp)
             PrimaryAction(if (match.ownReady) "Готовность подтверждена" else "Я готов", enabled = !busy && !match.ownReady && (match.serverNow==0L || remaining>0)) { vm.readyOnlineMatch(match.id) }
-            SecondaryAction("Отказаться", enabled = !busy && (match.serverNow==0L || remaining>0)) { vm.declineOnlineMatch(match.id) }
+            var confirmDecline by remember(match.id) { mutableStateOf(false) }
+            SecondaryAction("Отказаться", enabled = !busy && (match.serverNow==0L || remaining>0)) { confirmDecline=true }
+            if(confirmDecline) AlertDialog(onDismissRequest={confirmDecline=false},title={Text("Отказаться от матча?")},text={Text("Отказ отменит проверку готовности и временно ограничит поиск.")},confirmButton={TextButton(onClick={confirmDecline=false;vm.declineOnlineMatch(match.id)},enabled=!busy && (match.serverNow==0L || remaining>0)){Text("Отказаться")}},dismissButton={TextButton(onClick={confirmDecline=false}){Text("Остаться")}})
         }
         if (match.status in listOf("ACTIVE","DISPUTED") && match.phaseExpiresAt>0) {
             Text("Срок завершения: "+SimpleDateFormat("dd.MM HH:mm",Locale("ru")).format(Date(match.phaseExpiresAt*1000)),color=Muted,fontSize=12.sp)
@@ -118,8 +118,15 @@ internal fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boole
             Text("Отметились в лобби: ${match.lobbyArrivals}/10",color=Accent,fontSize=13.sp)
             if (match.lobbyRoom != null) PrimaryAction(if(match.ownArrived) "Вход отмечен" else "Я в лобби",enabled=!busy && !match.ownArrived) { vm.arriveLobby(match.id) }
         }
-        OnlineTeamPanel("Синяя команда", match.blue, Blue)
-        OnlineTeamPanel("Красная команда", match.red, Red)
+        TextButton(onClick={showTeams=!showTeams},modifier=Modifier.fillMaxWidth()){Text(if(showTeams) "Скрыть составы" else "Показать составы 5 × 5")}
+        if(showTeams) MatchRoster(match.blue,match.red)
+        match.quality?.let { quality ->
+            TextButton(onClick={showBalance=!showBalance},modifier=Modifier.fillMaxWidth()){Text(if(showBalance) "Скрыть баланс" else "Подробнее о балансе")}
+            if(showBalance){
+                Text("Разница средних: ${quality.averageGap} · Вторых ролей: ${quality.secondaryCount}",fontSize=12.sp,color=Muted)
+                Text("Повторные пары: ${quality.repeatedPairs}. Оценка не гарантирует равный исход.",fontSize=12.sp,color=Muted)
+            }
+        }
         if (match.status in listOf("ACTIVE","DISPUTED") && match.isCaptain) {
             Eyebrow("Доказательство результата")
             Text("Скриншотов от капитанов: ${match.evidenceCount}/2. Без двух разных скриншотов совпадающие результаты отправляются модератору. Снимок сам по себе не доказывает результат.",color=Muted,fontSize=12.sp)
@@ -151,21 +158,6 @@ internal fun OnlineMatchCard(match: OnlineMatch, vm: ScrimViewModel, busy: Boole
             } else Text(if (match.isCaptain) "Твой результат отправлен" else "Результат отправляют капитаны", color = Muted, fontSize = 12.sp)
         }
         if (match.status == "DISPUTED") Text("Результат требует проверки модератором: разные ответы капитанов или недостаточные доказательства. Новый поиск пока недоступен.", color = Red, fontSize = 13.sp)
-    }
-}
-
-@Composable
-private fun OnlineTeamPanel(title: String, players: List<OnlinePlayer>, color: Color) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(title, color = color, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-        players.forEach { participant ->
-            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(if (participant.role == "BARON") "Барон · К" else participant.role, color = Muted, fontSize = 10.sp, modifier = Modifier.width(80.dp))
-                Text(participant.riotId, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1,
-                    overflow = TextOverflow.Ellipsis)
-                Text(if (participant.ready) "✓" else "·", color = if (participant.ready) Accent else Muted)
-            }
-        }
     }
 }
 

@@ -76,6 +76,7 @@ import java.util.Locale
 @Composable
 fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) {
     val demoTeamsRequester = remember { BringIntoViewRequester() }
+    var showDemo by rememberSaveable { mutableStateOf(!state.hasOnlineAccount) }
     Page {
         Eyebrow("Подбор / закрытые матчи")
         Headline("Очередь 5 × 5", "Подбор по ролям и внутренней оценке силы. Демонстрация доступна отдельно ниже.")
@@ -131,6 +132,8 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
             }
         }
         HorizontalDivider(color = Outline)
+        if(state.hasOnlineAccount) SecondaryAction(if(showDemo) "Скрыть демонстрацию" else "Открыть демо-подбор"){showDemo=!showDemo}
+        if(showDemo || !state.hasOnlineAccount) {
         Eyebrow("Демонстрация / без сервера")
         PanelCard {
             StatusPill("Вымышленные игроки")
@@ -163,5 +166,6 @@ fun QueueScreen(state: ScrimUiState, vm: ScrimViewModel, onProfile: () -> Unit) 
                 OutlinedButton(onClick = { vm.finishDemo(Side.RED) }, modifier = Modifier.fillMaxWidth()) { Text("Победили красные") }
             }
         }
+         }
     }
 }

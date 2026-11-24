@@ -79,14 +79,14 @@ internal val Red = Color(0xFFFFA49F)
 internal fun Page(content: @Composable () -> Unit) {
     Column(
         modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(17.dp)
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) { content(); Spacer(Modifier.height(12.dp)) }
 }
 
 @Composable
 internal fun Eyebrow(text: String) {
-    Text(text.uppercase(), color = Accent, fontSize = 10.sp, letterSpacing = 1.8.sp, fontWeight = FontWeight.Bold)
+    Text(text.uppercase(), color = Accent, fontSize = 11.sp, letterSpacing = 0.8.sp, fontWeight = FontWeight.Bold)
 }
 
 @Composable
@@ -101,11 +101,11 @@ internal fun Headline(title: String, subtitle: String) {
 internal fun PanelCard(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(containerColor = Panel),
         border = BorderStroke(1.dp, Outline)
     ) {
-        Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             content()
         }
     }
@@ -116,7 +116,7 @@ internal fun PrimaryAction(text: String, enabled: Boolean = true, onClick: () ->
     Button(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         shape = RoundedCornerShape(12.dp),
         colors = ButtonDefaults.buttonColors(containerColor = Accent, contentColor = Color(0xFF10140A))
     ) { Text(text, fontWeight = FontWeight.ExtraBold) }
@@ -127,7 +127,7 @@ internal fun SecondaryAction(text: String, enabled: Boolean = true, onClick: () 
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
-        modifier = Modifier.fillMaxWidth().heightIn(min = 49.dp),
+        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
         border = BorderStroke(1.dp, Outline),
         shape = RoundedCornerShape(12.dp)
     ) { Text(text) }

@@ -135,11 +135,11 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
         }
     ) { inner ->
         Column(modifier = Modifier.fillMaxSize().padding(inner)) {
-            AppHeader()
-            if (state.onlineQueue?.match?.status == "READY_CHECK" && tab != Tab.QUEUE) {
+            AppHeader(unread = state.inbox?.count { !it.read }, onSettings = { tabName = Tab.SETTINGS.name })
+            if (state.onlineQueue?.match != null && tab != Tab.QUEUE) {
                 Row(modifier = Modifier.fillMaxWidth().background(Color(0xFF20291C)).padding(horizontal = 16.dp),
                     verticalAlignment = Alignment.CenterVertically) {
-                    Text("Матч найден · подтверди готовность", color = Color(0xFFCCE879), modifier = Modifier.weight(1f), fontSize = 13.sp)
+                    Text(when(state.onlineQueue?.match?.status){"READY_CHECK"->"Матч найден · подтверди готовность";"DISPUTED"->"Результат на проверке";else->"Текущий матч"}, color = Color(0xFFCCE879), modifier = Modifier.weight(1f), fontSize = 13.sp)
                     TextButton(onClick = { tabName = Tab.QUEUE.name }) { Text("Открыть") }
                 }
             }
@@ -169,9 +169,9 @@ private fun ScrimApp(vm: ScrimViewModel = viewModel()) {
 }
 
 @Composable
-private fun AppHeader() {
+private fun AppHeader(unread: Int?, onSettings: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
@@ -183,8 +183,9 @@ private fun AppHeader() {
         }
         Column(modifier = Modifier.weight(1f)) {
             Text("SCRIM ROOM", fontSize = 17.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 1.1.sp)
-            Text("КЛУБ ИГРОКОВ WILD RIFT", fontSize = 9.sp, color = Color(0xFF90999B), letterSpacing = 1.0.sp)
+            Text("КЛУБ WILD RIFT", fontSize = 10.sp, color = Color(0xFF90999B))
         }
+        if(unread!=null && unread>0) TextButton(onClick=onSettings){Text("Новые: $unread",fontSize=11.sp)}
         Text(
             "RC ${BuildConfig.VERSION_NAME}", fontSize = 10.sp, fontWeight = FontWeight.Bold,
             color = Color(0xFFCCE879),

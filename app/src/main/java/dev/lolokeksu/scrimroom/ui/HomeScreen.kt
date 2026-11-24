@@ -47,6 +47,8 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -76,7 +78,7 @@ import java.util.Locale
 fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, onCommunity: () -> Unit, onClub: () -> Unit, onSettings: () -> Unit, onSessions: () -> Unit, onHistory: () -> Unit) {
     Page {
         Eyebrow("SCRIM ROOM / VENTRY")
-        Headline("Сильные игроки.\nЧестный подбор.", "Закрытые пользовательские матчи Wild Rift для Грандмастеров и выше.")
+        Headline("Игровой клуб", "Пользовательские матчи · Грандмастер и выше")
         val queue = state.onlineQueue
         val match = queue?.match
         val approved = state.onlineStatus == "APPROVED"
@@ -93,7 +95,7 @@ fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, 
                 state.hasOnlineAccount -> "Проверка аккаунта"
                 else -> "Грандмастер и выше"
             }
-            Text(title,fontSize=24.sp,fontWeight=FontWeight.Bold)
+            Text(title,fontSize=21.sp,fontWeight=FontWeight.Bold)
             Text(when {
                 match != null -> "Открой очередь, чтобы посмотреть составы и доступные действия."
                 queue?.queued == true -> "Игроков в текущей очереди: ${queue.waiting}"
@@ -102,16 +104,19 @@ fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, 
                 state.onlineStatus == "REJECTED" -> "Проверь свою анкету и документы."
                 else -> "Укажи Riot ID, две роли и добавь два скриншота. Для входа нужна проверка модератором."
             },color=Muted,fontSize=13.sp)
-            PrimaryAction(if(approved) "Открыть очередь" else "Открыть профиль") { if(approved) onQueue() else onProfile() }
-            if(approved) SecondaryAction("Игровые сессии"){onSessions()}
+            PrimaryAction(if(match!=null) "Открыть матч" else if(approved) "Открыть очередь" else "Открыть профиль") { if(approved || match!=null) onQueue() else onProfile() }
         }
         Eyebrow("Играть")
-        HomeEntry("Расписание","Предварительная запись на игровые окна.","Открыть расписание",onSessions)
-        HomeEntry("Команды и турниры","Постоянные составы, сезонные встречи и кубки.","Открыть соревнования",onClub)
+        Column {
+            HomeEntry("Расписание","Игровые окна","Открыть расписание",onSessions)
+            HomeEntry("Команды и турниры","Составы и кубки","Открыть соревнования",onClub)
+        }
         Eyebrow("Участник")
-        HomeEntry("Сообщество","Друзья, приглашения и обращения к модератору.","Открыть сообщество",onCommunity)
-        HomeEntry("Личная история","Подтверждённые матчи и статистика по ролям.","Открыть историю",onHistory)
-        HomeEntry("Настройки","Восстановление доступа, приватность и уведомления.","Открыть настройки",onSettings)
+        Column {
+            HomeEntry("Сообщество","Друзья и приглашения","Открыть сообщество",onCommunity)
+            HomeEntry("Личная история","Матчи и рейтинг","Открыть историю",onHistory)
+            HomeEntry("Настройки",state.inbox?.let { "Непрочитанных: ${it.count{item->!item.read}}" } ?: "Аккаунт и уведомления","Открыть настройки",onSettings)
+        }
         if(!approved) {
             Eyebrow("Познакомиться с подбором")
             Text("Без аккаунта можно посмотреть отдельную демонстрацию на вымышленных игроках.",color=Muted,fontSize=12.sp)
@@ -123,11 +128,14 @@ fun HomeScreen(state: ScrimUiState, onProfile: () -> Unit, onQueue: () -> Unit, 
 
 @Composable
 private fun HomeEntry(title:String,description:String,action:String,onClick:()->Unit) {
-    Surface(shape=RoundedCornerShape(12.dp),color=Panel,modifier=Modifier.fillMaxWidth()) {
-        Column(modifier=Modifier.padding(14.dp),verticalArrangement=Arrangement.spacedBy(4.dp)) {
-            Text(title,fontSize=17.sp,fontWeight=FontWeight.Bold)
-            Text(description,color=Muted,fontSize=12.sp)
-            TextButton(onClick=onClick,modifier=Modifier.align(Alignment.End)){Text(action)}
+    Surface(onClick=onClick,color=Panel,modifier=Modifier.fillMaxWidth().heightIn(min=56.dp).semantics { contentDescription=action }) {
+        Row(modifier=Modifier.padding(horizontal=12.dp,vertical=8.dp),verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+            Column(Modifier.weight(1f),verticalArrangement=Arrangement.spacedBy(2.dp)) {
+                Text(title,fontSize=15.sp,fontWeight=FontWeight.Bold)
+                Text(description,color=Muted,fontSize=12.sp)
+            }
+            Text("›",fontSize=24.sp,color=Accent)
         }
     }
+    HorizontalDivider(color=Outline)
 }
